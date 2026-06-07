@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Hausmasken-Generator</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 1rem;
+    gap: 0.75rem;
+    background: #f0f0f0;
+  }
+  h1 { font-size: 1.3rem; display: flex; align-items: center; gap: 0.5rem; }
+  .main {
+    display: flex;
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+  }
+  .left {
+    width: 340px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  label { font-weight: bold; font-size: 0.95rem; }
+  .label-row { display: flex; align-items: baseline; gap: 0.75rem; }
+  .label-row a { font-size: 0.8rem; font-weight: normal; color: #555; cursor: pointer; }
+  textarea {
+    flex: 1;
+    min-height: 120px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    resize: none;
+  }
+  .hint { color: #666; font-size: 0.82rem; line-height: 1.5; }
+  .hint code { background: #e0e0e0; padding: 0 3px; border-radius: 2px; }
+  .error {
+    background: #fdecea;
+    border: 1px solid #f28b82;
+    border-radius: 4px;
+    padding: 0.5rem;
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 0.8rem;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .buttons { display: flex; gap: 0.5rem; }
+  button {
+    flex: 1;
+    padding: 0.55rem 0;
+    font-size: 0.9rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .btn-preview { background: #1a73e8; color: #fff; }
+  .btn-preview:hover:not(:disabled) { background: #1558b0; }
+  .btn-preview:disabled { background: #90b8f0; cursor: default; }
+  .btn-save { background: #2e7d32; color: #fff; }
+  .btn-save:hover:not(:disabled) { background: #1b5e20; }
+  .btn-save:disabled { background: #aaa; cursor: default; }
+  .btn-file { background: #555; color: #fff; }
+  .btn-file:hover { background: #333; }
+  .right {
+    flex: 1;
+    min-width: 0;
+    background: #1a1a2e;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6666aa;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
+  #overlay.loading { color: #fff; }
+  #spinner {
+    display: none;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<h1><img src="data:image/png;base64,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">MobaLedLib Lichtmasken-Generator</h1>
+<div class="main">
+  <div class="left">
+    <div class="label-row">
+      <label for="csv">Definition:</label>
+      <a onclick="loadSample()">Beispiel laden</a>
+    </div>
+    <textarea id="csv" placeholder="raum&#10;100,80,30&#10;vorne&#10;15,10,8,8&#10;…">{{csv}}</textarea>
+    <div id="error-box"></div>
+    <div class="buttons">
+      <button class="btn-preview" id="btn-preview" onclick="loadPreview()">&#9654; Vorschau</button>
+      <button class="btn-save" id="btn-save" onclick="saveStl()" disabled>&#8595; STL</button>
+    </div>
+    <div class="buttons">
+      <button class="btn-file" onclick="loadCsvFile()">&#128194; Laden</button>
+      <button class="btn-file" onclick="saveCsvFile()">&#128190; Speichern</button>
+    </div>
+    <input type="file" id="file-input" accept=".csv,.txt" style="display:none">
+    <p class="hint"><b>Raum:</b> <code>raum</code><br>
+      Format: Breite, Tiefe, Höhe<br>
+      Optional: Offset/Stärke der Ausssenwand (alle/x,y/v,r,h,l)
+    </p>
+    <p class="hint"><b>Hausplatine</b>: <code>licht</code><br>
+      Format: offset_x, offset_y, (rotation)<br>
+      Urspung: vorne links<br>
+      Ohne Werte: zentriert<br>
+      Rotation in Grad (90,180,-90)<br>
+      Keyword weglassen = keine Platine<br>
+    </p>
+    <p class="hint"><b>Fenster</b>: <code>vorne</code>, <code>hinten</code>, <code>links</code>, <code>rechts</code>, <br>
+      Eine Öffnung = eine Zeile<br>
+      Format: x_start, y_start, Breite, Höhe<br>
+      Ursprung je Wand unten, links<br>
+      Einzelne Zahl = Trennwand (automatisch)<br>
+      Zwei Zahlen = Trennwand mit Länge<br>
+      Keine Fenster = keine Wand! Massive Wand mit Fenster <code>0,0,0,0</code>
+    </p>
+    <p class="hint"><b>Dach</b>: <code>dach</code><br>
+      Öffnungen wie Fenster, Ursprung vorne, links
+    </p>
+    <p class="hint"><b>Wände</b>: <code>wand</code><br>
+      Format: x_start, y_start, x_ecke1, y_ecke2,...<br>
+      Wand entlang mehrerer Punkte (max. 10)
+    </p>
+    <p class="hint"><b>Druckparameter</b>: <code>druck</code><br>
+      Format: keyword,wert(e)<br>
+      <code>wand</code>: Wandstärke<br>
+      <code>innen/aussen</code>: Wandstärke Innen/Außenwände<br>
+      <code>dach</code>: Wandstärke Dach
+    </p>
+    <p class="hint">Alle Angaben in Millimetern! Nachkommastellen sind mit Punkt als Trennzeichen möglich.</p>
+  </div>
+  <div class="right" id="viewer-container">
+    <div id="overlay">
+      <div id="spinner"></div>
+      <span id="overlay-text">Vorschau laden um das Modell anzuzeigen</span>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const container = document.getElementById('viewer-container');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x1a1a2e);
+Object.assign(renderer.domElement.style, {
+  position: 'absolute', inset: '0', width: '100%', height: '100%', zIndex: '0',
+});
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+camera.position.set(200, 150, 200);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(1, 2, 1.5);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x6688cc, 0.4);
+fill.position.set(-1, -1, -1);
+scene.add(fill);
+
+scene.add(new THREE.GridHelper(500, 50, 0x444466, 0x2a2a44));
+
+function resize() {
+  const w = container.clientWidth, h = container.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(container);
+resize();
+
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+const loader = new STLLoader();
+let mesh = null;
+let currentBuffer = null;
+
+window._loadStlIntoViewer = function(buffer) {
+  currentBuffer = buffer;
+  const geometry = loader.parse(buffer);
+
+  if (mesh) {
+    scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+  }
+
+  mesh = new THREE.Mesh(geometry, new THREE.MeshPhongMaterial({
+    color: 0x4fc3f7,
+    specular: 0x222233,
+    shininess: 35,
+    side: THREE.DoubleSide,
+  }));
+  mesh.rotation.x = -Math.PI / 2;
+  scene.add(mesh);
+
+  const box = new THREE.Box3().setFromObject(mesh);
+  const center = box.getCenter(new THREE.Vector3());
+  const size   = box.getSize(new THREE.Vector3());
+  const r = Math.max(size.x, size.y, size.z);
+
+  controls.target.copy(center);
+  camera.position.set(center.x + r * 1.3, center.y + r * 0.9, center.z + r * 1.3);
+  camera.near = r / 200;
+  camera.far  = r * 30;
+  camera.updateProjectionMatrix();
+  controls.update();
+
+  document.getElementById('btn-save').disabled = false;
+  document.getElementById('overlay').style.display = 'none';
+};
+
+window._getCurrentBuffer = () => currentBuffer;
+</script>
+
+<script>
+function setLoading(on) {
+  const btn     = document.getElementById('btn-preview');
+  const overlay = document.getElementById('overlay');
+  const spinner = document.getElementById('spinner');
+  const text    = document.getElementById('overlay-text');
+  btn.disabled = on;
+  overlay.style.display = 'flex';
+  overlay.className = on ? 'loading' : '';
+  spinner.style.display = on ? 'block' : 'none';
+  if (on) text.textContent = 'Generiere STL…';
+}
+
+const SAMPLE_CSV = `licht
+21,23
+raum
+107,75,35
+vorne
+15,15,12,15
+47,4,13,26
+-15,15,12,15
+hinten
+13.5,4,22.5,26
+71,4,22.5,26
+41
+links
+13,15,11,15
+52,15,11,15
+40.5
+rechts
+13,15,11,15
+52,15,11,15
+40.5
+wand
+40,0,40,23,65,23,65,0
+dach
+50,5,5,5
+druck
+aussen,1.2
+dach,2`;
+
+function loadSample() {
+  document.getElementById('csv').value = SAMPLE_CSV;
+}
+
+async function loadPreview() {
+  const csv = document.getElementById('csv').value.trim();
+  if (!csv) return;
+  document.getElementById('error-box').innerHTML = '';
+  setLoading(true);
+  try {
+    const resp = await fetch('/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ csv }),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text();
+      document.getElementById('error-box').innerHTML =
+        '<div class="error">' + msg.replace(/</g, '&lt;') + '</div>';
+      document.getElementById('overlay').style.display = 'none';
+    } else {
+      window._loadStlIntoViewer(await resp.arrayBuffer());
+    }
+  } catch (e) {
+    document.getElementById('error-box').innerHTML =
+      '<div class="error">Verbindungsfehler: ' + e.message + '</div>';
+    document.getElementById('overlay').style.display = 'none';
+  }
+  document.getElementById('btn-preview').disabled = false;
+}
+
+function loadCsvFile() {
+  document.getElementById('file-input').click();
+}
+
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) { document.getElementById('csv').value = ev.target.result; };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+function saveCsvFile() {
+  const text = document.getElementById('csv').value;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.download = 'hausmaske.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function saveStl() {
+  const buf = window._getCurrentBuffer && window._getCurrentBuffer();
+  if (!buf) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+  a.download = 'house_mask.stl';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+</script>
+</body>
+</html>
