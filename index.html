@@ -133,6 +133,7 @@
       Urspung: vorne links<br>
       Ohne Werte: zentriert<br>
       Rotation in Grad (90,180,-90)<br>
+      Schalterposition: <code>weiter</code>, <code>ende</code>
       Keyword weglassen = keine Platine<br>
     </p>
     <p class="hint"><b>Fenster</b>: <code>vorne</code>, <code>hinten</code>, <code>links</code>, <code>rechts</code>, <br>
@@ -279,32 +280,33 @@ function setLoading(on) {
 }
 
 const SAMPLE_CSV = `licht
-21,23
+21,23,ende
 raum
-107,75,35
+110,78,35
+2.5
 vorne
-15,15,12,15
-47,4,13,26
--15,15,12,15
+16,15,12,15
+48,4,13,26
+-16,15,12,15
 hinten
-13.5,4,22.5,26
-71,4,22.5,26
-41
+15,4,22.5,26
+72.5,4,22.5,26
+42
 links
-13,15,11,15
-52,15,11,15
-40.5
+14,15,11,15
+53,15,11,15
+42
 rechts
-13,15,11,15
-52,15,11,15
-40.5
+14,15,11,15
+53,15,11,15
+42
 wand
-40,0,40,23,65,23,65,0
+41,0,41,25,66,25,66,0
 dach
-50,5,5,5
-druck
-aussen,1.2
-dach,2`;
+44,10,5,5
+text
+Musterhaus
+`;
 
 function loadSample() {
   document.getElementById('csv').value = SAMPLE_CSV;

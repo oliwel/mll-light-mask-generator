@@ -5,11 +5,10 @@
 include <house_data.scad>
 
 // ── Konstanten ────────────────────────────────────────────────────────────────
-licht_w    = 40;   // Dachausschnitt Breite [mm]
-licht_d    = 35;   // Dachausschnitt Tiefe  [mm]
+licht_h = 1; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
 tunnel_w   = 15;   // Tunnel Innenbreite (X) [mm]
 tunnel_d   = 6;    // Tunnel Innentiefe  (Y) [mm]
-licht_tiefe = 1.2; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
+
 
 // ── Print-Offset ──────────────────────────────────────────────────────────────
 // print_offset = [vorne, rechts, hinten, links]
@@ -92,25 +91,30 @@ module tunnel(l) {
     cy  = ly + licht_d / 2;
     tw  = tunnel_w / 2;
     td  = tunnel_d / 2;
-    h   = room_height - 1.2;
-    lhd = licht_d / 2;
+    // 1mm Abstand für Platinenauflage
+    h   = room_height - licht_h;
 
     difference() {
         union() {
-            // Vorderwand: 15mm in X, innenwand tief, volle Höhe
+            // Standfuss - solider Würfel bildet Pfeiler + X-Wände
             translate([cx - 12.5, cy - td - innenwand, 0])
                 cube([25, tunnel_d + 2*innenwand, h]);
-            
+
+            // Kreuzwand in Y-Richtung
             translate([lx - innenwand , cy - innenwand/2, 0])
                 cube([ licht_w + 2 * innenwand, innenwand, h]);
-            
-            // center_fin forward: von Vorderkante Cutout+Rahmen bis Tunnel-Vorderwand
-            translate([cx - innenwand/2, ly - innenwand, 0])
-                cube([innenwand, lhd - td, h]);
 
-            // center_fin backward: von Hinterwand Tunnel bis Hinterkante Cutout + innenwand
-            translate([cx - innenwand/2, cy + td + innenwand, 0])
-                cube([innenwand, lhd - td, h]);
+            // Kreuzwand in X-Richtung
+            translate([cx - innenwand/2, ly - innenwand, 0])
+                cube([innenwand, licht_d + 2* innenwand, h]);
+
+            // Ausrichtungshilfe
+            translate([lx + licht_w, ly + 21.4, h])
+                cylinder( h = licht_h, d = 6.8, $fn=32 );
+
+            // Halterung Schalter (Ausschnitt erfolgt später)
+            translate([cx - 3, ly - 4, room_height - 3 ])
+                cube([ 6, 4, 3]);
 
         }
 
@@ -143,10 +147,54 @@ module licht_border(l) {
 // Z: 2mm unter Rahmenboden bis durch die Decke (globale difference).
 
 module cable_slot(l) {
-    cx = l[0] + licht_w / 2;
-    ly = l[1];
-    translate([cx - 2.5, ly - 3, room_height - 2.5])
-        cube([5, 8, 3]);
+    cx   = l[0] + licht_w / 2;
+    ly   = l[1];
+    mode = l[3];  // 0 = Quader, 1 = weiter (rechts Keil), 2 = ende (links Keil)
+    z0   = room_height - 2.5;
+    // Wandbereich hinter Ausschnitt immer öffnen
+    translate([cx - 2, ly, z0])
+        cube([4, 3, 3]);
+    if (mode == 1) {
+        // Linke Hälfte: Quader
+        translate([cx - 2, ly - 3, z0])
+            cube([2, 3, 3]);
+        // Rechte Hälfte: Keil, öffnet sich nach oben
+        translate([cx, ly - 3, z0])
+            polyhedron(
+                points = [
+                    [0, 0, 0], [0, 3, 0],
+                    [0, 0, 3], [0, 3, 3],
+                    [2, 0, 3], [2, 3, 3],
+                ],
+                faces = [
+                    [0, 4, 2], [1, 3, 5],
+                    [0, 2, 3, 1], [2, 4, 5, 3],
+                    [0, 1, 5, 4],
+                ]
+            );
+    } else if (mode == 2) {
+        // Linke Hälfte: Keil gespiegelt, öffnet sich nach oben
+        translate([cx - 2, ly - 3, z0])
+            polyhedron(
+                points = [
+                    [2, 0, 0], [2, 3, 0],
+                    [0, 0, 3], [2, 0, 3],
+                    [0, 3, 3], [2, 3, 3],
+                ],
+                faces = [
+                    [0, 3, 2], [1, 4, 5],
+                    [0, 1, 5, 3], [2, 3, 5, 4],
+                    [0, 2, 4, 1],
+                ]
+            );
+        // Rechte Hälfte: Quader
+        translate([cx, ly - 3, z0])
+            cube([2, 3, 3]);
+    } else {
+        // mode == 0: kompletter Quader
+        translate([cx - 2, ly - 3, z0])
+            cube([4, 3, 3]);
+    }
 }
 
 // ── Freie Innenwände (Polygonzug) ─────────────────────────────────────────────
@@ -317,4 +365,11 @@ union() {
 // Kabelschlitz global schneiden
 for (l = licht)
     licht_transform(l) cable_slot(l);
+
+for (t = texts)
+    translate([t[1], t[2], room_height - 0.4])
+        rotate([0, 0, t[3]])
+            linear_extrude(height = 0.5)
+                text(t[0], size = 5);
+
 } // difference

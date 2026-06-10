@@ -19,6 +19,10 @@ CSV-Format:
   dx,dy[,rotation]               (2 oder 3 Werte, Ursprung vorne links mit print_offset)
   dach
   x,y,breite,tiefe               (4 Werte, Ursprung vorne links mit print_offset)
+  text
+  Text                            (1 Wert: Text an Position 5,5)
+  x,y,Text                        (3 Werte: Text an x,y)
+  x,y,rotation,Text               (4 Werte: Text an x,y mit Rotation)
 
 Standalone: python3 server.py --parse sample.csv > house_data.scad
 Server:     python3 server.py
@@ -64,15 +68,16 @@ def _rate_ok(ip: str) -> bool:
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 MASK_SCAD = os.path.join(BASE_DIR, "house_mask.scad")
 
-KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck"}
+KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
 DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
 
 _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]"},
     "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
-    "licht":  {"counts": {2, 3},    "hint": "x,y[,rotation]"},
+    "licht":  {"hint": "x,y[,rotation][,weiter|ende]"},
     "dach":   {"counts": {4},       "hint": "x,y,breite,tiefe"},
+    "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
     "vorne":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
     "hinten": {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
     "links":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
@@ -140,22 +145,85 @@ def validate_and_parse(text: str) -> dict:
                 sections[current].append([keyword, parsed[0]])
                 row_counts[current] += 1
                 continue
-            if keyword not in KNOWN_SECTIONS:
+            if current == "text" and keyword not in KNOWN_SECTIONS:
+                pass  # Textinhalt: nicht-numerische Zeile als Datum durchfallen lassen
+            elif keyword not in KNOWN_SECTIONS:
                 errors.append(
                     f'Zeile {lineno}: Unbekanntes Schlüsselwort "{first}" - '
                     f"erlaubt: {', '.join(sorted(KNOWN_SECTIONS))}"
                 )
+                continue
             else:
                 current = keyword
                 sections.setdefault(current, [])
                 row_counts.setdefault(current, 0)
-            continue
+                continue
 
         if current is None:
             errors.append(f"Zeile {lineno}: Datenwerte vor dem ersten Abschnitts-Schlüsselwort")
             continue
 
         values = [c for c in row if c]
+
+        # licht-Abschnitt: optionales Keyword als letztes Feld
+        if current == "licht":
+            _SLOT_KW = {"weiter": 1, "ende": 2}
+            slot_mode = 0
+            vals = list(values)
+            if vals and vals[-1].lower() in _SLOT_KW:
+                slot_mode = _SLOT_KW[vals[-1].lower()]
+                vals = vals[:-1]
+            count = len(vals)
+            if count not in {2, 3}:
+                errors.append(
+                    f'Zeile {lineno}: Abschnitt "licht" erwartet 2 oder 3 Werte '
+                    f"(x,y[,rotation][,weiter|ende]), gefunden: {count}"
+                )
+                continue
+            bad_licht = [v for v in vals if not _numeric(v)]
+            if bad_licht:
+                errors.append(
+                    f'Zeile {lineno}: Nicht-numerische Werte: {", ".join(bad_licht)}'
+                )
+                continue
+            row_counts[current] += 1
+            nums = _parse_values(vals)
+            sections[current].append(
+                [nums[0], nums[1], nums[2] if len(nums) >= 3 else 0, slot_mode]
+            )
+            continue
+
+        # text-Abschnitt: letztes Feld ist ein String, vorherige Felder sind Zahlen
+        if current == "text":
+            count = len(values)
+            if count not in {1, 3, 4}:
+                errors.append(
+                    f'Zeile {lineno}: Abschnitt "text" erwartet 1, 3 oder 4 Werte '
+                    f"(Text | x,y,Text | x,y,rotation,Text), gefunden: {count}"
+                )
+                continue
+            text_val = values[-1]
+            num_vals = values[:-1]
+            bad_nums = [v for v in num_vals if not _numeric(v)]
+            if bad_nums:
+                errors.append(
+                    f'Zeile {lineno}: Nicht-numerische Koordinaten: {", ".join(bad_nums)}'
+                )
+                continue
+            if len(text_val) > 50:
+                errors.append(f"Zeile {lineno}: Text zu lang (max 50 Zeichen)")
+                continue
+            row_counts[current] += 1
+            nums = _parse_values(num_vals) if num_vals else []
+            if len(nums) == 0:
+                entry = [text_val, 5, 5, 0]
+            elif len(nums) == 2:
+                entry = [text_val, nums[0], nums[1], 0]
+            else:
+                entry = [text_val, nums[0], nums[1], nums[2]]
+            sections[current].append(entry)
+            continue
+
         bad = [v for v in values if not _numeric(v)]
         if bad:
             errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad)}")
@@ -269,6 +337,18 @@ def _list1d(values: list) -> str:
     return "[" + ", ".join(str(v) for v in values) + "]"
 
 
+def _scad_str(s: str) -> str:
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _vec_texts(texts: list) -> str:
+    entries = [
+        f'["{_scad_str(t[0])}", {t[1]}, {t[2]}, {t[3]}]'
+        for t in texts
+    ]
+    return "[" + ", ".join(entries) + "]"
+
+
 def _split_wall(entries: list) -> tuple[list, list]:
     """Trennt Öffnungen (4 Werte) von Innenwänden (1 oder 2 Werte).
 
@@ -305,8 +385,8 @@ def _normalize_offset(offset_row: list | None) -> list:
     return list(v)  # already 4
 
 
-_LICHT_W = 40
-_LICHT_D = 35
+_LICHT_W = 41
+_LICHT_D = 36
 
 
 def _resolve_licht_coord(offset, inner_size, licht_size):
@@ -378,7 +458,7 @@ def generate_scad(sections: dict) -> str:
     wand       = druck.get("wand",   0.8)
     aussenwand = druck.get("aussen", wand)
     innenwand  = druck.get("innen",  wand)
-    dachwand   = druck.get("dach",   wand)
+    dachwand   = druck.get("dach",   1.0)
 
     po_fr, po_ri, po_ba, po_le = offset
 
@@ -402,14 +482,16 @@ def generate_scad(sections: dict) -> str:
         # Keine Werte → Ausschnitt im Dachinnenbereich zentrieren
         cx = (inner_w - _LICHT_W) / 2 + po_le
         cy = (inner_d - _LICHT_D) / 2 + po_fr
-        licht_val = f"[[{cx},{cy},0]]"
+        licht_val = f"[[{cx},{cy},0,0]]"
     else:
         # Koordinaten relativ zur inneren Dach-Ecke (po_le, po_fr), negativ = von der anderen Seite
+        # Einträge sind jetzt immer 4-elementig: [x, y, rotation, slot_mode]
         entries = [
             [
                 _resolve_licht_coord(row[0], inner_w, _LICHT_W) + po_le,
                 _resolve_licht_coord(row[1], inner_d, _LICHT_D) + po_fr,
-                row[2] if len(row) >= 3 else 0,
+                row[2],
+                row[3],
             ]
             for row in licht_rows
         ]
@@ -433,10 +515,14 @@ def generate_scad(sections: dict) -> str:
     left_walls  = _normalize_walls(left_walls,  d)
     right_walls = _normalize_walls(right_walls, d)
 
+    text_rows = sections.get("text", [])
+
     lines = [
         f"room_width   = {w};",
         f"room_depth   = {d};",
         f"room_height  = {room_h};",
+        f"licht_w      = {_LICHT_W};",
+        f"licht_d      = {_LICHT_D};",
         f"wand         = {wand};",
         f"aussenwand   = {aussenwand};",
         f"innenwand    = {innenwand};",
@@ -453,6 +539,7 @@ def generate_scad(sections: dict) -> str:
         f"back_walls  = {_vec(back_walls)};",
         f"left_walls  = {_vec(left_walls)};",
         f"right_walls = {_vec(right_walls)};",
+        f"texts = {_vec_texts(text_rows)};",
     ]
     return "\n".join(lines)
 
