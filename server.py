@@ -16,9 +16,9 @@ CSV-Format:
   pos                             (Innenwand-Ansatz – 1 Wert, auto-Länge)
   pos,laenge                      (Innenwand mit expliziter Länge – 2 Werte)
   licht
-  dx,dy[,rotation]               (2 oder 3 Werte, Ursprung vorne links mit print_offset)
+  x,y[,rotation][,weiter|ende]   (2–3 Werte, absolut vom Körperursprung 0,0; negativ = von rechts/hinten)
   dach
-  x,y,breite,tiefe               (4 Werte, Ursprung vorne links mit print_offset)
+  x,y,breite,tiefe               (4 Werte, absolut vom Körperursprung 0,0)
   text
   Text                            (1 Wert: Text an Position 5,5)
   x,y,Text                        (3 Werte: Text an x,y)
@@ -373,6 +373,15 @@ def _normalize_walls(walls: list, wall_len: int | float) -> list:
     return [[wall_len + pos if pos < 0 else pos, laenge] for pos, laenge in walls]
 
 
+def _normalize_walls_inverted(walls: list, wall_len: int | float) -> list:
+    """Wie _normalize_walls, aber gespiegelt (hinten/links: pos=0 = außen-linke Ecke)."""
+    result = []
+    for pos, laenge in walls:
+        abs_pos = wall_len - pos if pos >= 0 else -pos
+        result.append([abs_pos, laenge])
+    return result
+
+
 def _normalize_offset(offset_row: list | None) -> list:
     """Normalisiert print_offset auf [vorne, rechts, hinten, links]."""
     if not offset_row:
@@ -389,11 +398,11 @@ _LICHT_W = 41
 _LICHT_D = 36
 
 
-def _resolve_licht_coord(offset, inner_size, licht_size):
-    """Negative offset = Abstand von der rechten/hinteren Innenkante."""
+def _resolve_licht_coord(offset, outer_size, licht_size):
+    """Negative offset = Abstand von der rechten/hinteren Außenkante des Gesamtkörpers."""
     if offset >= 0:
         return offset
-    return inner_size + offset - licht_size
+    return outer_size + offset - licht_size
 
 
 def _resolve_poly_point(x, y, w, d):
@@ -429,18 +438,16 @@ def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
                     f"außerhalb des Raums (0–{room_h})"
                 )
 
-    inner_w = w - po_le - po_ri
-    inner_d = d - po_fr - po_ba
     for idx, row in enumerate(sections.get("licht", []), 1):
-        lx = _resolve_licht_coord(row[0], inner_w, _LICHT_W) + po_le
-        ly = _resolve_licht_coord(row[1], inner_d, _LICHT_D) + po_fr
+        lx = _resolve_licht_coord(row[0], w, _LICHT_W)
+        ly = _resolve_licht_coord(row[1], d, _LICHT_D)
         if lx < 0 or lx + _LICHT_W > w:
             errors.append(f'"licht" {idx}: X {lx}–{lx + _LICHT_W} außerhalb des Raums (0–{w})')
         if ly < 0 or ly + _LICHT_D > d:
             errors.append(f'"licht" {idx}: Y {ly}–{ly + _LICHT_D} außerhalb des Raums (0–{d})')
 
     for idx, row in enumerate(sections.get("dach", []), 1):
-        x, y, bw, bd = row[0] + po_le, row[1] + po_fr, row[2], row[3]
+        x, y, bw, bd = row[0], row[1], row[2], row[3]
         if x < 0 or x + bw > w:
             errors.append(f'"dach" {idx}: X {x}–{x + bw} außerhalb des Raums (0–{w})')
         if y < 0 or y + bd > d:
@@ -484,12 +491,11 @@ def generate_scad(sections: dict) -> str:
         cy = (inner_d - _LICHT_D) / 2 + po_fr
         licht_val = f"[[{cx},{cy},0,0]]"
     else:
-        # Koordinaten relativ zur inneren Dach-Ecke (po_le, po_fr), negativ = von der anderen Seite
-        # Einträge sind jetzt immer 4-elementig: [x, y, rotation, slot_mode]
+        # Koordinaten absolut vom Körperursprung (0,0); negativ = von der rechten/hinteren Außenkante
         entries = [
             [
-                _resolve_licht_coord(row[0], inner_w, _LICHT_W) + po_le,
-                _resolve_licht_coord(row[1], inner_d, _LICHT_D) + po_fr,
+                _resolve_licht_coord(row[0], w, _LICHT_W),
+                _resolve_licht_coord(row[1], d, _LICHT_D),
                 row[2],
                 row[3],
             ]
@@ -498,7 +504,7 @@ def generate_scad(sections: dict) -> str:
         licht_val = _vec(entries)
 
     dach_rows = sections.get("dach", [])
-    dach_cuts = [[row[0] + po_le, row[1] + po_fr, row[2], row[3]] for row in dach_rows]
+    dach_cuts = [[row[0], row[1], row[2], row[3]] for row in dach_rows]
 
     front_wins, front_walls = _split_wall(sections.get("vorne",  []))
     back_wins,  back_walls  = _split_wall(sections.get("hinten", []))
@@ -510,10 +516,10 @@ def generate_scad(sections: dict) -> str:
     left_wins  = _normalize_wins(left_wins,  d)
     right_wins = _normalize_wins(right_wins, d)
 
-    front_walls = _normalize_walls(front_walls, w)
-    back_walls  = _normalize_walls(back_walls,  w)
-    left_walls  = _normalize_walls(left_walls,  d)
-    right_walls = _normalize_walls(right_walls, d)
+    front_walls = _normalize_walls(front_walls,          w)
+    back_walls  = _normalize_walls_inverted(back_walls,  w)
+    left_walls  = _normalize_walls_inverted(left_walls,  d)
+    right_walls = _normalize_walls(right_walls,          d)
 
     text_rows = sections.get("text", [])
 

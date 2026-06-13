@@ -24,8 +24,8 @@ wall_left_inner  = po_le + aussenwand;
 wall_right_inner = room_width  - po_ri - aussenwand;
 
 // ── Lichtöffnung ──────────────────────────────────────────────────────────────
-// licht = [[x, y, rotation], ...]
-// x/y = Abstand von links vorne (Außenwand) zur linken unteren Ecke des Ausschnitts.
+// licht = [[x, y, rotation, slot_mode], ...]
+// x/y = absolute SCAD-Koordinaten vom Körperursprung (0,0).
 // Ohne Datenwerte im licht-Abschnitt → automatisch zentriert (server.py).
 
 // Referenz-Eintrag für Innenwand-Logik (erster Eintrag)
