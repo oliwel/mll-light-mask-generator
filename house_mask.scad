@@ -5,7 +5,7 @@
 include <house_data.scad>
 
 // ── Konstanten ────────────────────────────────────────────────────────────────
-licht_h = 1; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
+licht_h = 1.1; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
 tunnel_w   = 15;   // Tunnel Innenbreite (X) [mm]
 tunnel_d   = 6;    // Tunnel Innentiefe  (Y) [mm]
 
@@ -304,43 +304,44 @@ module walls_from_right(walls) {
 
 difference() {
 union() {
-    // Hohlbox: Außenhülle minus Innenraum + Öffnungen
+
+    // Außenwände – nur wenn Fenster/Türen vorhanden, sonst weggelassen
+    if (len(front_windows) > 0)
+        difference() {
+            translate([po_le, po_fr, 0])
+                color([0,0,0.5]) cube([room_width - po_le - po_ri, aussenwand, room_height - dachwand]);
+            front_cuts(front_windows);
+        }
+    if (len(back_windows) > 0)
+        difference() {
+            translate([po_le, wall_back_inner, 0])
+                color([0,0,0.5]) cube([room_width - po_le - po_ri, aussenwand, room_height - dachwand]);
+            back_cuts(back_windows);
+        }
+    if (len(left_windows) > 0)
+        difference() {
+            translate([po_le, po_fr, 0])
+                color([0,0,0.5]) cube([aussenwand, room_depth - po_fr - po_ba, room_height - dachwand]);
+            left_cuts(left_windows);
+        }
+    if (len(right_windows) > 0)
+        difference() {
+            translate([wall_right_inner, po_fr, 0])
+                color([0,0,0.5]) cube([aussenwand, room_depth - po_fr - po_ba, room_height - dachwand]);
+            right_cuts(right_windows);
+        }
+
+    // Dach mit Lichtöffnungen und Dachausschnitten
     difference() {
-        translate([po_le, po_fr, 0])
-            color([0,0,0.5]) cube([room_width - po_le - po_ri, room_depth - po_fr - po_ba, room_height]);
-        translate([wall_left_inner, wall_front_inner, -dachwand])
-            cube([
-                wall_right_inner - wall_left_inner,
-                wall_back_inner  - wall_front_inner,
-                room_height
-            ]);
-        front_cuts(front_windows);
-        back_cuts(back_windows);
-        left_cuts(left_windows);
-        right_cuts(right_windows);
-        // Wand entfernen wenn keine Fenster/Türen
-        if (len(front_windows) == 0)
-            translate([po_le - 0.1, po_fr - 0.1, -0.1])
-                cube([room_width - po_le - po_ri + 0.2, aussenwand + 0.2, room_height + 0.2]);
-        if (len(back_windows) == 0)
-            translate([po_le - 0.1, room_depth - po_ba - aussenwand - 0.1, -0.1])
-                cube([room_width - po_le - po_ri + 0.2, aussenwand + 0.2, room_height + 0.2]);
-        if (len(left_windows) == 0)
-            translate([po_le - 0.1, po_fr - 0.1, -0.1])
-                cube([aussenwand + 0.2, room_depth - po_fr - po_ba + 0.2, room_height + 0.2]);
-        if (len(right_windows) == 0)
-            translate([room_width - po_ri - aussenwand - 0.1, po_fr - 0.1, -0.1])
-                cube([aussenwand + 0.2, room_depth - po_fr - po_ba + 0.2, room_height + 0.2]);
-        
-        // Decke mit Dachausschnitt.
+        translate([po_le, po_fr, room_height - dachwand])
+            color([0,0,0.5]) cube([room_width - po_le - po_ri, room_depth - po_fr - po_ba, dachwand]);
         for (l = licht)
             licht_transform(l)
-                translate([l[0] - licht_w/2, l[1] - licht_d/2, 0])
-                    cube([licht_w, licht_d, room_height + 0.2]);
+                translate([l[0] - licht_w/2, l[1] - licht_d/2, room_height - dachwand - 0.1])
+                    cube([licht_w, licht_d, dachwand + 0.2]);
         for (c = dach_cuts)
             translate([c[0], c[1], room_height - dachwand - 0.1])
                 cube([c[2], c[3], dachwand + 0.2]);
-        
     }
 
     // Tunnel-Struktur für jeden Dachausschnitt
@@ -362,6 +363,7 @@ union() {
         licht_transform(l)
             color([0.8, 0.8, 0]) licht_border(l);
 } // union
+
 // Kabelschlitz global schneiden
 for (l = licht)
     licht_transform(l) cable_slot(l);
