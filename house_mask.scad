@@ -24,19 +24,19 @@ wall_left_inner  = po_le + aussenwand;
 wall_right_inner = room_width  - po_ri - aussenwand;
 
 // ── Lichtöffnung ──────────────────────────────────────────────────────────────
-// licht = [[x, y, rotation, slot_mode], ...]
-// x/y = absolute SCAD-Koordinaten vom Körperursprung (0,0).
+// licht = [[cx, cy, rotation, slot_mode], ...]
+// cx/cy = Mittelpunkt des Ausschnitts, absolute SCAD-Koordinaten vom Körperursprung (0,0).
 // Ohne Datenwerte im licht-Abschnitt → automatisch zentriert (server.py).
 
 // Referenz-Eintrag für Innenwand-Logik (erster Eintrag)
-licht_x  = len(licht) > 0 ? licht[0][0] : 0;
-licht_y  = len(licht) > 0 ? licht[0][1] : 0;
-licht_cx = licht_x + licht_w / 2;
-licht_cy = licht_y + licht_d / 2;
+licht_cx = len(licht) > 0 ? licht[0][0] : 0;
+licht_cy = len(licht) > 0 ? licht[0][1] : 0;
+licht_x  = licht_cx - licht_w / 2;
+licht_y  = licht_cy - licht_d / 2;
 
 module licht_transform(l) {
-    cx = l[0] + licht_w / 2;
-    cy = l[1] + licht_d / 2;
+    cx = l[0];
+    cy = l[1];
     translate([cx, cy, 0])
         rotate([0, 0, l[2]])
             translate([-cx, -cy, 0])
@@ -86,9 +86,9 @@ module right_cuts(windows) {
 // Würfel 5×5×5mm außen links und rechts (ab Innenmass).
 
 module tunnel(l) {
-    lx  = l[0];   ly  = l[1];
-    cx  = lx + licht_w / 2;
-    cy  = ly + licht_d / 2;
+    cx  = l[0];   cy  = l[1];
+    lx  = cx - licht_w / 2;
+    ly  = cy - licht_d / 2;
     tw  = tunnel_w / 2;
     td  = tunnel_d / 2;
     // 1mm Abstand für Platinenauflage
@@ -133,7 +133,7 @@ module tunnel(l) {
 // 2mm hoch, innenwand breit. Kabelschlitz wird global geschnitten (cable_slot).
 
 module licht_border(l) {
-    lx = l[0]; ly = l[1];
+    lx = l[0] - licht_w / 2; ly = l[1] - licht_d / 2;
     translate([lx - innenwand, ly - innenwand, room_height - 3])
         difference() {
             cube([licht_w + 2*innenwand, licht_d + 2*innenwand, 3]);
@@ -147,8 +147,8 @@ module licht_border(l) {
 // Z: 2mm unter Rahmenboden bis durch die Decke (globale difference).
 
 module cable_slot(l) {
-    cx   = l[0] + licht_w / 2;
-    ly   = l[1];
+    cx   = l[0];
+    ly   = l[1] - licht_d / 2;
     mode = l[3];  // 0 = Quader, 1 = weiter (rechts Keil), 2 = ende (links Keil)
     z0   = room_height - 2.5;
     // Wandbereich hinter Ausschnitt immer öffnen
@@ -335,7 +335,7 @@ union() {
         // Decke mit Dachausschnitt.
         for (l = licht)
             licht_transform(l)
-                translate([l[0], l[1], 0])
+                translate([l[0] - licht_w/2, l[1] - licht_d/2, 0])
                     cube([licht_w, licht_d, room_height + 0.2]);
         for (c = dach_cuts)
             translate([c[0], c[1], room_height - dachwand - 0.1])

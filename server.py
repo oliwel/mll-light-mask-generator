@@ -165,7 +165,7 @@ def validate_and_parse(text: str) -> dict:
 
         values = [c for c in row if c]
 
-        # licht-Abschnitt: optionales Keyword als letztes Feld
+        # licht-Abschnitt: optionales Keyword als letztes Feld; "0" = automatisch
         if current == "licht":
             _SLOT_KW = {"weiter": 1, "ende": 2}
             slot_mode = 0
@@ -173,6 +173,11 @@ def validate_and_parse(text: str) -> dict:
             if vals and vals[-1].lower() in _SLOT_KW:
                 slot_mode = _SLOT_KW[vals[-1].lower()]
                 vals = vals[:-1]
+            # Einzelner Wert "0" → Autopositionierung für beide Achsen
+            if vals == ["0"]:
+                row_counts[current] += 1
+                sections[current].append([0, 0, 0, slot_mode])
+                continue
             count = len(vals)
             if count not in {2, 3}:
                 errors.append(
@@ -398,11 +403,11 @@ _LICHT_W = 41
 _LICHT_D = 36
 
 
-def _resolve_licht_coord(offset, outer_size, licht_size):
-    """Negative offset = Abstand von der rechten/hinteren Außenkante des Gesamtkörpers."""
+def _resolve_licht_coord(offset, outer_size):
+    """Liefert den Mittelpunkt des Ausschnitts. Negativ = Abstand von der rechten/hinteren Kante."""
     if offset >= 0:
         return offset
-    return outer_size + offset - licht_size
+    return outer_size + offset
 
 
 def _resolve_poly_point(x, y, w, d):
@@ -438,13 +443,24 @@ def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
                     f"außerhalb des Raums (0–{room_h})"
                 )
 
+    _LICHT_MARGIN = 2  # mm Mindestabstand zur Körperkante
     for idx, row in enumerate(sections.get("licht", []), 1):
-        lx = _resolve_licht_coord(row[0], w, _LICHT_W)
-        ly = _resolve_licht_coord(row[1], d, _LICHT_D)
-        if lx < 0 or lx + _LICHT_W > w:
-            errors.append(f'"licht" {idx}: X {lx}–{lx + _LICHT_W} außerhalb des Raums (0–{w})')
-        if ly < 0 or ly + _LICHT_D > d:
-            errors.append(f'"licht" {idx}: Y {ly}–{ly + _LICHT_D} außerhalb des Raums (0–{d})')
+        if row[0] != 0:
+            cx = _resolve_licht_coord(row[0], w)
+            lx = cx - _LICHT_W / 2
+            if lx < _LICHT_MARGIN or lx + _LICHT_W > w - _LICHT_MARGIN:
+                errors.append(
+                    f'"licht" {idx}: X {lx}–{lx + _LICHT_W} muss mindestens {_LICHT_MARGIN}mm '
+                    f"innerhalb des Körpers liegen ({_LICHT_MARGIN}–{w - _LICHT_MARGIN})"
+                )
+        if row[1] != 0:
+            cy = _resolve_licht_coord(row[1], d)
+            ly = cy - _LICHT_D / 2
+            if ly < _LICHT_MARGIN or ly + _LICHT_D > d - _LICHT_MARGIN:
+                errors.append(
+                    f'"licht" {idx}: Y {ly}–{ly + _LICHT_D} muss mindestens {_LICHT_MARGIN}mm '
+                    f"innerhalb des Körpers liegen ({_LICHT_MARGIN}–{d - _LICHT_MARGIN})"
+                )
 
     for idx, row in enumerate(sections.get("dach", []), 1):
         x, y, bw, bd = row[0], row[1], row[2], row[3]
@@ -482,30 +498,8 @@ def generate_scad(sections: dict) -> str:
 
     inner_w = w - po_le - po_ri
     inner_d = d - po_fr - po_ba
-    licht_rows = sections.get("licht")
-    if licht_rows is None:
-        licht_val = "[]"
-    elif len(licht_rows) == 0:
-        # Keine Werte → Ausschnitt im Dachinnenbereich zentrieren
-        cx = (inner_w - _LICHT_W) / 2 + po_le
-        cy = (inner_d - _LICHT_D) / 2 + po_fr
-        licht_val = f"[[{cx},{cy},0,0]]"
-    else:
-        # Koordinaten absolut vom Körperursprung (0,0); negativ = von der rechten/hinteren Außenkante
-        entries = [
-            [
-                _resolve_licht_coord(row[0], w, _LICHT_W),
-                _resolve_licht_coord(row[1], d, _LICHT_D),
-                row[2],
-                row[3],
-            ]
-            for row in licht_rows
-        ]
-        licht_val = _vec(entries)
 
-    dach_rows = sections.get("dach", [])
-    dach_cuts = [[row[0], row[1], row[2], row[3]] for row in dach_rows]
-
+    # Wände zuerst normalisieren – Positionen werden für optimale licht-Platzierung benötigt
     front_wins, front_walls = _split_wall(sections.get("vorne",  []))
     back_wins,  back_walls  = _split_wall(sections.get("hinten", []))
     left_wins,  left_walls  = _split_wall(sections.get("links",  []))
@@ -520,6 +514,33 @@ def generate_scad(sections: dict) -> str:
     back_walls  = _normalize_walls_inverted(back_walls,  w)
     left_walls  = _normalize_walls_inverted(left_walls,  d)
     right_walls = _normalize_walls(right_walls,          d)
+
+    # Auto-Position: geometrische Mitte des Innenraums; Fallback für "0"-Koordinaten
+    lx_auto = po_le + inner_w / 2
+    ly_auto = po_fr + inner_d / 2
+    lx_auto = max(po_le + _LICHT_W / 2, min(lx_auto, w - po_ri - _LICHT_W / 2))
+    ly_auto = max(po_fr + _LICHT_D / 2, min(ly_auto, d - po_ba - _LICHT_D / 2))
+
+    licht_rows = sections.get("licht")
+    if licht_rows is None:
+        licht_val = "[]"
+    elif len(licht_rows) == 0:
+        licht_val = f"[[{lx_auto},{ly_auto},0,0]]"
+    else:
+        # Mittelpunkt des Ausschnitts; 0 = automatisch; negativ = Abstand von rechts/hinten
+        entries = [
+            [
+                lx_auto if row[0] == 0 else _resolve_licht_coord(row[0], w),
+                ly_auto if row[1] == 0 else _resolve_licht_coord(row[1], d),
+                row[2],
+                row[3],
+            ]
+            for row in licht_rows
+        ]
+        licht_val = _vec(entries)
+
+    dach_rows = sections.get("dach", [])
+    dach_cuts = [[row[0], row[1], row[2], row[3]] for row in dach_rows]
 
     text_rows = sections.get("text", [])
 
