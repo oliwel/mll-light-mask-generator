@@ -118,11 +118,16 @@ def validate_and_parse(text: str) -> dict:
 
     for lineno, row in enumerate(csv_module.reader(io.StringIO(text)), start=1):
         row = [c.strip() for c in row]
+        # Inline-Kommentare: ab dem ersten '#' bis Zeilenende verwerfen
+        for i, c in enumerate(row):
+            h = c.find("#")
+            if h != -1:
+                head = c[:h].strip()
+                row = row[:i] + ([head] if head else [])
+                break
         if not row or not any(row):
             continue
         first = row[0]
-        if first.startswith("#"):
-            continue
 
         if first and not _numeric(first):
             keyword = first.lower()

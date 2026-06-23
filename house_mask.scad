@@ -301,7 +301,10 @@ module walls_from_right(walls) {
 }
 
 // ── Hauptgeometrie ────────────────────────────────────────────────────────────
+// Druckorientierung: Modell um die X-Achse kippen, so dass die Dachfläche
+// (ursprünglich Oberkante bei z=room_height) flach auf dem Druckbett (z=0) liegt.
 
+translate([0, room_depth, 0]) rotate([180, 0, 0])
 difference() {
 union() {
 
