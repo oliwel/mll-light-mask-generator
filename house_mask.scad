@@ -114,7 +114,7 @@ module tunnel(l) {
 
             // Halterung Schalter (Ausschnitt erfolgt später)
             translate([cx - 3, ly - 4, room_height - 3 ])
-                cube([ 6, 4, 3]);
+                cube([ 6, 4, 3.0]);
 
         }
 
@@ -130,7 +130,7 @@ module tunnel(l) {
 }
 
 // ── Randrahmen um Dachausschnitt ──────────────────────────────────────────────
-// 2mm hoch, innenwand breit. Kabelschlitz wird global geschnitten (cable_slot).
+// 2mm hoch, innenwand breit. Kabelschlitz wird global geschnitten (mode_switch).
 
 module licht_border(l) {
     lx = l[0] - licht_w / 2; ly = l[1] - licht_d / 2;
@@ -146,7 +146,7 @@ module licht_border(l) {
 // 5mm breit, innenwand tief, schneidet alle Elemente an der Vorderkante des Ausschnitts.
 // Z: 2mm unter Rahmenboden bis durch die Decke (globale difference).
 
-module cable_slot(l) {
+module mode_switch(l) {
     cx   = l[0];
     ly   = l[1] - licht_d / 2;
     mode = l[3];  // 0 = Quader, 1 = weiter (rechts Keil), 2 = ende (links Keil)
@@ -155,45 +155,21 @@ module cable_slot(l) {
     translate([cx - 2, ly, z0])
         cube([4, 3, 3]);
     if (mode == 1) {
-        // Linke Hälfte: Quader
-        translate([cx - 2, ly - 3, z0])
-            cube([2, 3, 3]);
-        // Rechte Hälfte: Keil, öffnet sich nach oben
-        translate([cx, ly - 3, z0])
-            polyhedron(
-                points = [
-                    [0, 0, 0], [0, 3, 0],
-                    [0, 0, 3], [0, 3, 3],
-                    [2, 0, 3], [2, 3, 3],
-                ],
-                faces = [
-                    [0, 4, 2], [1, 3, 5],
-                    [0, 2, 3, 1], [2, 4, 5, 3],
-                    [0, 1, 5, 4],
-                ]
-            );
+        // Trapez: links voll offen, rechts nach oben auslaufend
+        translate([cx, ly + 0.1, z0])
+            rotate([90, 0, 0])
+                linear_extrude(height = 3.1)
+                    polygon([[-2, 0], [0, 0], [2, 3.1], [-2, 3.1]]);
     } else if (mode == 2) {
-        // Linke Hälfte: Keil gespiegelt, öffnet sich nach oben
-        translate([cx - 2, ly - 3, z0])
-            polyhedron(
-                points = [
-                    [2, 0, 0], [2, 3, 0],
-                    [0, 0, 3], [2, 0, 3],
-                    [0, 3, 3], [2, 3, 3],
-                ],
-                faces = [
-                    [0, 3, 2], [1, 4, 5],
-                    [0, 1, 5, 3], [2, 3, 5, 4],
-                    [0, 2, 4, 1],
-                ]
-            );
-        // Rechte Hälfte: Quader
-        translate([cx, ly - 3, z0])
-            cube([2, 3, 3]);
+        // Trapez gespiegelt: rechts voll offen, links nach oben auslaufend
+        translate([cx, ly + 0.1, z0])
+            rotate([90, 0, 0])
+                linear_extrude(height = 3.1)
+                    polygon([[0, 0], [2, 0], [2, 3.1], [-2, 3.1]]);
     } else {
         // mode == 0: kompletter Quader
-        translate([cx - 2, ly - 3, z0])
-            cube([4, 3, 3]);
+        translate([cx - 2, ly - 2.9, z0])
+            cube([4, 3, 3.1]);
     }
 }
 
@@ -369,7 +345,7 @@ union() {
 
 // Kabelschlitz global schneiden
 for (l = licht)
-    licht_transform(l) cable_slot(l);
+    licht_transform(l) mode_switch(l);
 
 for (t = texts)
     translate([t[1], t[2], room_height - 0.4])
