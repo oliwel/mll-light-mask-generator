@@ -24,6 +24,17 @@ CSV-Format:
   x,y,Text                        (3 Werte: Text an x,y)
   x,y,rotation,Text               (4 Werte: Text an x,y mit Rotation)
 
+Lichtbox-Modus (Schlüsselwort "box", schließt "raum" aus → Renderer lightbox.scad):
+  box
+  breite,hoehe,tiefe              (genau 3 Werte)
+  oben|links|rechts               (Fläche für LED-Öffnung: TOP / LEFT / RIGHT)
+  <ledtype>                       (LED mittig auf der Fläche)
+  <ledtype>[,<clip>][,offset_breite[,offset_tiefe]]
+                                  (clip optional als 2. Argument; offset_breite =
+                                   entlang Vorderkante, offset_tiefe = Z-Richtung)
+  ledtype ∈ {none, 3mm, 5mm, plcc6, plcc2, ws2811}
+  clip    ∈ {ohne, einfach, doppel}  (Standard: ohne, weglassbar)
+
 Standalone: python3 server.py --parse sample.csv > house_data.scad
 Server:     python3 server.py
 """
@@ -65,11 +76,29 @@ def _rate_ok(ip: str) -> bool:
         _rate_data[ip] = ts
         return True
 
-BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
-MASK_SCAD = os.path.join(BASE_DIR, "house_mask.scad")
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+MASK_SCAD     = os.path.join(BASE_DIR, "house_mask.scad")
+LIGHTBOX_SCAD = os.path.join(BASE_DIR, "lightbox.scad")
 
 KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
 DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
+
+# ── Lichtbox-Modus (Schlüsselwort "box") ────────────────────────────────────────
+# Eigener Renderer (lightbox.scad). "box" und "raum" schließen sich gegenseitig aus.
+BOX_FACES = {"oben": 0, "links": 1, "rechts": 2}  # → FACE_TOP / FACE_LEFT / FACE_RIGHT
+BOX_SECTIONS = {"box"} | set(BOX_FACES)
+# LED-Typ-Namen → LED_* Konstanten in lightbox.scad
+LED_NAMES = {
+    "none": 0, "keine": 0,
+    "3mm": 1,
+    "5mm": 2,
+    "plcc6": 3,   # LED_5050
+    "plcc2": 4,   # LED_3528
+    "ws2811": 5,
+}
+# Clip-Namen → CLIP_* Konstanten in lightbox.scad (optional, Standard: ohne)
+CLIP_NAMES = {"ohne": 0, "einfach": 1, "doppel": 2}
+_BOX_LED_MARGIN = 5  # mm Mindestabstand der LED-Mitte zur Flächenkante
 
 _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]"},
@@ -110,7 +139,123 @@ def _parse_values(row: list[str]) -> list:
     return result
 
 
+def _clean_row(row: list[str]) -> list[str]:
+    """Strippt Zellen und verwirft Inline-Kommentare ab dem ersten '#'."""
+    row = [c.strip() for c in row]
+    for i, c in enumerate(row):
+        hpos = c.find("#")
+        if hpos != -1:
+            head = c[:hpos].strip()
+            return row[:i] + ([head] if head else [])
+    return row
+
+
+def _detect_box_mode(text: str) -> bool:
+    """True, sobald irgendwo ein Abschnitt "box" beginnt (Lichtbox-Modus)."""
+    for row in csv_module.reader(io.StringIO(text)):
+        row = _clean_row(row)
+        if row and row[0].lower() == "box":
+            return True
+    return False
+
+
+def _parse_box(text: str) -> dict:
+    """Parst eine Lichtbox-Konfiguration (Schlüsselwort "box").
+
+    Abschnitte:
+      box                 → eine Zeile: breite,höhe,tiefe
+      oben|links|rechts   → je Zeile eine LED: <typ>[, offset_breite[, offset_tiefe]]
+    """
+    errors: list[str] = []
+    sections: dict = {}
+    current: str | None = None
+    row_counts: dict[str, int] = {}
+
+    for lineno, row in enumerate(csv_module.reader(io.StringIO(text)), start=1):
+        row = _clean_row(row)
+        values = [c for c in row if c]
+        if not values:
+            continue
+        first = values[0]
+        low = first.lower()
+
+        # Abschnitts-Schlüsselwort (allein in der Zeile)
+        if low in BOX_SECTIONS and len(values) == 1:
+            current = low
+            sections.setdefault(current, [])
+            row_counts.setdefault(current, 0)
+            continue
+
+        if current is None:
+            errors.append(f"Zeile {lineno}: Datenwerte vor dem ersten Abschnitts-Schlüsselwort")
+            continue
+
+        if current == "box":
+            if len(values) != 3 or any(not _numeric(v) for v in values):
+                errors.append(
+                    f'Zeile {lineno}: Abschnitt "box" erwartet 3 Werte '
+                    f"(breite,höhe,tiefe), gefunden: {len(values)}"
+                )
+                continue
+            row_counts[current] += 1
+            if row_counts[current] > 1:
+                errors.append(f'Zeile {lineno}: Abschnitt "box" erlaubt nur eine Datenzeile')
+                continue
+            try:
+                sections[current].append(_parse_values(values))
+            except ValidationError as e:
+                errors.append(f"Zeile {lineno}: {e}")
+            continue
+
+        # current ∈ {oben, links, rechts}: LED-Spezifikation
+        # Format: <typ> [, <clip>] [, offset_breite [, offset_tiefe]]
+        if low not in LED_NAMES:
+            errors.append(
+                f'Zeile {lineno}: Unbekannter LED-Typ "{first}" - erlaubt: '
+                f"{', '.join(sorted(LED_NAMES))}"
+            )
+            continue
+        rest = values[1:]
+        # Optionaler Clip als zweites Argument (Standard: ohne)
+        clip = 0
+        if rest and rest[0].lower() in CLIP_NAMES:
+            clip = CLIP_NAMES[rest[0].lower()]
+            rest = rest[1:]
+        if len(rest) > 2:
+            errors.append(
+                f'Zeile {lineno}: Abschnitt "{current}" erwartet '
+                f"<typ>[, <clip>][, offset_breite[, offset_tiefe]], zu viele Werte: {len(values)}"
+            )
+            continue
+        bad = [v for v in rest if not _numeric(v)]
+        if bad:
+            errors.append(
+                f'Zeile {lineno}: ungültige Offsets/Clip: {", ".join(bad)} '
+                f"(Clip ∈ {{{', '.join(CLIP_NAMES)}}})"
+            )
+            continue
+        try:
+            nums = _parse_values(rest)
+        except ValidationError as e:
+            errors.append(f"Zeile {lineno}: {e}")
+            continue
+        off1 = nums[0] if len(nums) >= 1 else 0
+        off2 = nums[1] if len(nums) >= 2 else 0
+        sections[current].append([LED_NAMES[low], clip, off1, off2])
+        row_counts[current] += 1
+
+    if not sections.get("box"):
+        errors.append('Abschnitt "box" mit "breite,höhe,tiefe" erforderlich')
+
+    if errors:
+        raise ValidationError("\n".join(errors))
+    return sections
+
+
 def validate_and_parse(text: str) -> dict:
+    if _detect_box_mode(text):
+        return _parse_box(text)
+
     errors = []
     sections: dict = {}
     current: str | None = None
@@ -477,7 +622,51 @@ def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
     return errors
 
 
+def generate_box_scad(sections: dict) -> str:
+    """Erzeugt die box_data.scad-Daten für den Lichtbox-Renderer (lightbox.scad).
+
+    Diese Datei setzt box_dims/box_open/box_leds und bindet anschließend
+    lightbox.scad ein, das daraus das Modell rendert.
+    """
+    w, h, d = sections["box"][0]
+
+    errors: list[str] = []
+    mounts: list = []
+    for sec, face in BOX_FACES.items():
+        for led, clip, off1, off2 in sections.get(sec, []):
+            # off1 = entlang der Vorderkante, off2 = in Z-Richtung (Tiefe).
+            # FACE_TOP:        u = Breite (X), v = Tiefe (Z)  → [off1, off2]
+            # FACE_LEFT/RIGHT: u = Tiefe (Z),  v = Höhe  (Y)  → [off2, off1]
+            if face == 0:  # FACE_TOP
+                u, v = off1, off2
+                lim_u, lim_v = w, d
+            else:          # FACE_LEFT / FACE_RIGHT
+                u, v = off2, off1
+                lim_u, lim_v = d, h
+            if abs(u) > lim_u / 2 - _BOX_LED_MARGIN or abs(v) > lim_v / 2 - _BOX_LED_MARGIN:
+                errors.append(
+                    f'Abschnitt "{sec}": LED-Offset ({off1},{off2}) liegt außerhalb der '
+                    f"Fläche oder näher als {_BOX_LED_MARGIN}mm an der Kante"
+                )
+                continue
+            mounts.append([face, led, u, v, clip])
+
+    if errors:
+        raise ValidationError("\n".join(errors))
+
+    lines = [
+        f"box_dims = [{w}, {h}, {d}];",
+        "box_open = 0;",
+        f"box_leds = {_vec(mounts)};",
+        "include <lightbox.scad>;",
+    ]
+    return "\n".join(lines)
+
+
 def generate_scad(sections: dict) -> str:
+    if "box" in sections:
+        return generate_box_scad(sections)
+
     raum_rows = sections.get("raum", [[100, 80, 30]])
     w, d, room_h = raum_rows[0]
     offset = _normalize_offset(raum_rows[1] if len(raum_rows) > 1 else None)
@@ -622,23 +811,36 @@ class Handler(BaseHTTPRequestHandler):
 
     def _generate_stl(self, csv_content: str) -> tuple:
         try:
-            scad_data = csv_to_scad(csv_content)
+            sections  = validate_and_parse(csv_content)
+            scad_data = generate_scad(sections)
         except ValidationError as e:
             return None, str(e)
 
+        # "box"-Modus rendert mit lightbox.scad; box_data.scad bindet den Renderer
+        # selbst ein und ist damit das OpenSCAD-Eingabefile.
+        is_box = "box" in sections
+
         tmpdir = tempfile.mkdtemp(prefix="hausmaske_")
         try:
-            data_scad = os.path.join(tmpdir, "house_data.scad")
-            mask_scad = os.path.join(tmpdir, "house_mask.scad")
-            stl_path  = os.path.join(tmpdir, "house_mask.stl")
+            stl_path = os.path.join(tmpdir, "out.stl")
+            if is_box:
+                data_scad   = os.path.join(tmpdir, "box_data.scad")
+                renderer    = os.path.join(tmpdir, "lightbox.scad")
+                render_main = data_scad
+                renderer_src = LIGHTBOX_SCAD
+            else:
+                data_scad   = os.path.join(tmpdir, "house_data.scad")
+                renderer    = os.path.join(tmpdir, "house_mask.scad")
+                render_main = renderer
+                renderer_src = MASK_SCAD
 
             with open(data_scad, "w", encoding="utf-8") as f:
                 f.write(scad_data)
-            shutil.copy(MASK_SCAD, mask_scad)
+            shutil.copy(renderer_src, renderer)
 
             try:
                 r = subprocess.run(
-                    ["openscad", "-o", stl_path, mask_scad],
+                    ["openscad", "-o", stl_path, render_main],
                     capture_output=True, text=True, cwd=tmpdir,
                     timeout=60,
                 )
