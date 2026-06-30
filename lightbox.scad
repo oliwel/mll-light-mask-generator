@@ -14,7 +14,7 @@ LED_3MM    = 1; // durchgehender Zylinder 3mm
 LED_5MM    = 2; // durchgehender Zylinder 5mm
 LED_5050   = 3; // innen Zylinder 4mm, außen Ausschnitt 6x6mm (WS2812)
 LED_3528   = 4; // innen Zylinder 3mm, außen Ausschnitt 4x3mm
-LED_WS2811 = 5; // innen Ausschnitt 6x6mm, außen Zylinder 15mm
+LED_WS2812 = 5; // innen Ausschnitt 6x6mm, außen Zylinder 15mm
 LED_DEFAULT = LED_5050;
 
 /*
@@ -93,7 +93,7 @@ module led_negative_by_type( led ) {
     else if (led == LED_5MM)    led_negative(through = 5);
     else if (led == LED_5050)   led_negative(inner = 4,      outer = [6,6]);
     else if (led == LED_3528)   led_negative(inner = 3,      outer = [4,3]);
-    else if (led == LED_WS2811) led_negative(inner = [6,6],  outer = 11);
+    else if (led == LED_WS2812) led_negative(inner = [6,6],  outer = 11);
 }
 
 /*
@@ -228,7 +228,7 @@ module clibox() {
     height = 15;
     depth = 20;
     open = OPEN_NONE;
-    led = LED_WS2811;
+    led = LED_WS2812;
     led_pos = [0,0];
     clip = CLIP_DOUBLE;
     face = FACE_TOP;

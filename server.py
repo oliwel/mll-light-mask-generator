@@ -32,7 +32,7 @@ Lichtbox-Modus (Schlüsselwort "box", schließt "raum" aus → Renderer lightbox
   <ledtype>[,<clip>][,offset_breite[,offset_tiefe]]
                                   (clip optional als 2. Argument; offset_breite =
                                    entlang Vorderkante, offset_tiefe = Z-Richtung)
-  ledtype ∈ {none, 3mm, 5mm, plcc6, plcc2, ws2811}
+  ledtype ∈ {none, 3mm, 5mm, plcc6, plcc2, ws2812}
   clip    ∈ {ohne, einfach, doppel}  (Standard: ohne, weglassbar)
 
 Standalone: python3 server.py --parse sample.csv > house_data.scad
