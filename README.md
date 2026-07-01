@@ -228,11 +228,16 @@ Musterhaus
 
 Zusätzliche Öffnungen in der Dachfläche, z. B. für Dachfenster oder zum Einbau weiterer LEDs von oben.
 
-**Format:** `X, Y, Breite, Tiefe` (Ursprung vorne links)
+**Format:**
+- `X, Y, Breite, Tiefe` – rechteckiger Ausschnitt (Ecke bei X,Y, Ursprung vorne links)
+- `X, Y, <LED-Typ>` – Öffnung passend zu einem LED-Typ (Mitte bei X,Y); die Geometrie
+  wird wie in der Lichtbox erzeugt. Anstelle der Ausschnitt-Masse wird der Name des
+  LED-Typs angegeben: `none`, `3mm`, `5mm`, `plcc6`, `plcc2`, `ws2812`.
 
 ```
 dach
 44,10,5,5
+55,40,ws2812
 ```
 
 ---

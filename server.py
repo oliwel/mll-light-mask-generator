@@ -18,7 +18,8 @@ CSV-Format:
   licht
   x,y[,rotation][,weiter|ende]   (2–3 Werte, absolut vom Körperursprung 0,0; negativ = von rechts/hinten)
   dach
-  x,y,breite,tiefe               (4 Werte, absolut vom Körperursprung 0,0)
+  x,y,breite,tiefe               (4 Werte: Rechteck-Ausschnitt, Ecke x,y, absolut vom Körperursprung 0,0)
+  x,y,<ledtyp>                   (3 Werte: Öffnung nach LED-Typ, Mitte x,y; ledtyp ∈ {none,3mm,5mm,plcc6,plcc2,ws2812})
   text
   Text                            (1 Wert: Text an Position 5,5)
   x,y,Text                        (3 Werte: Text an x,y)
@@ -99,13 +100,14 @@ LED_NAMES = {
 # Clip-Namen → CLIP_* Konstanten in lightbox.scad (optional, Standard: ohne)
 CLIP_NAMES = {"ohne": 0, "einfach": 1, "doppel": 2}
 _BOX_LED_MARGIN = 5  # mm Mindestabstand der LED-Mitte zur Flächenkante
+_DACH_LED_R     = 5.5  # mm halbe max. LED-Öffnungsgröße (WS2812 Ø11) für Randprüfung
 
 _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]"},
     "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
     "licht":  {"hint": "x,y[,rotation][,weiter|ende]"},
-    "dach":   {"counts": {4},       "hint": "x,y,breite,tiefe"},
+    "dach":   {"hint": "x,y,breite,tiefe  |  x,y,<ledtyp>"},
     "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
     "vorne":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
     "hinten": {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
@@ -379,6 +381,41 @@ def validate_and_parse(text: str) -> dict:
             sections[current].append(entry)
             continue
 
+        # dach-Abschnitt: entweder x,y,breite,tiefe (Rechteck-Ausschnitt) oder
+        # x,y,<ledtyp> (Öffnung nach LED-Typ, Geometrie via led_negative_by_type)
+        if current == "dach":
+            count = len(values)
+            if count == 3 and not _numeric(values[2]):
+                led_name = values[2].lower()
+                if led_name not in LED_NAMES:
+                    errors.append(
+                        f'Zeile {lineno}: Unbekannter LED-Typ "{values[2]}" - erlaubt: '
+                        f"{', '.join(sorted(LED_NAMES))}"
+                    )
+                    continue
+                bad_dach = [v for v in values[:2] if not _numeric(v)]
+                if bad_dach:
+                    errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad_dach)}")
+                    continue
+                nums = _parse_values(values[:2])
+                row_counts[current] += 1
+                sections[current].append([nums[0], nums[1], LED_NAMES[led_name]])
+                continue
+            if count != 4:
+                errors.append(
+                    f'Zeile {lineno}: Abschnitt "dach" erwartet 4 Werte (x,y,breite,tiefe) '
+                    f"oder 3 Werte (x,y,<ledtyp>), gefunden: {count}"
+                )
+                continue
+            bad_dach = [v for v in values if not _numeric(v)]
+            if bad_dach:
+                errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad_dach)}")
+                continue
+            nums = _parse_values(values)
+            row_counts[current] += 1
+            sections[current].append([nums[0], nums[1], nums[2], nums[3]])
+            continue
+
         bad = [v for v in values if not _numeric(v)]
         if bad:
             errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad)}")
@@ -613,11 +650,20 @@ def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
                 )
 
     for idx, row in enumerate(sections.get("dach", []), 1):
-        x, y, bw, bd = row[0], row[1], row[2], row[3]
-        if x < 0 or x + bw > w:
-            errors.append(f'"dach" {idx}: X {x}–{x + bw} außerhalb des Raums (0–{w})')
-        if y < 0 or y + bd > d:
-            errors.append(f'"dach" {idx}: Y {y}–{y + bd} außerhalb des Raums (0–{d})')
+        if len(row) >= 4:
+            x, y, bw, bd = row[0], row[1], row[2], row[3]
+            if x < 0 or x + bw > w:
+                errors.append(f'"dach" {idx}: X {x}–{x + bw} außerhalb des Raums (0–{w})')
+            if y < 0 or y + bd > d:
+                errors.append(f'"dach" {idx}: Y {y}–{y + bd} außerhalb des Raums (0–{d})')
+        else:
+            # LED-Öffnung: Mitte cx,cy; max. Öffnungsradius _DACH_LED_R
+            cx, cy = row[0], row[1]
+            r = _DACH_LED_R
+            if cx - r < 0 or cx + r > w:
+                errors.append(f'"dach" {idx}: X {cx} (±{r}) außerhalb des Raums (0–{w})')
+            if cy - r < 0 or cy + r > d:
+                errors.append(f'"dach" {idx}: Y {cy} (±{r}) außerhalb des Raums (0–{d})')
 
     return errors
 
@@ -733,8 +779,8 @@ def generate_scad(sections: dict) -> str:
         ]
         licht_val = _vec(entries)
 
-    dach_rows = sections.get("dach", [])
-    dach_cuts = [[row[0], row[1], row[2], row[3]] for row in dach_rows]
+    # dach-Eintrag: [x,y,breite,tiefe] (Rechteck) oder [cx,cy,led] (LED-Typ)
+    dach_cuts = [list(row) for row in sections.get("dach", [])]
 
     text_rows = sections.get("text", [])
 

@@ -9,6 +9,65 @@ licht_h = 1.1; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
 tunnel_w   = 15;   // Tunnel Innenbreite (X) [mm]
 tunnel_d   = 6;    // Tunnel Innentiefe  (Y) [mm]
 
+// ── LED-Öffnungen im Dach (portiert aus lightbox.scad) ──────────────────────────
+// Öffnungstyp (dach_cuts-Eintrag [cx, cy, led]). Bestimmt die komplette
+// Öffnungsgeometrie; wird anstelle der Ausschnitt-Masse (breite,tiefe) übergeben.
+// Zweiteilige Öffnungen sind durchgehend: das größere Feature (LED-Tasche) sitzt auf
+// der Dachoberseite, das kleine Feature (Lichtaustritt) liegt led_membrane (0.4mm)
+// tief auf der Rauminnenseite (Platzierung dreht die kanonische Lage um 180°).
+LED_NONE   = 0; // keine Öffnung
+LED_3MM    = 1; // durchgehender Zylinder 3mm
+LED_5MM    = 2; // durchgehender Zylinder 5mm
+LED_5050   = 3; // Licht Zylinder 4mm, Tasche 6x6mm
+LED_3528   = 4; // Licht Zylinder 3mm, Tasche 4x3mm
+LED_WS2812 = 5; // Licht Ausschnitt 6x6mm, Tasche Zylinder 11mm
+
+led_membrane = 0.4; // verbleibende Materialdicke auf der Lichtaustrittsseite [mm]
+
+/*
+ * Einzelnes Feature einer Öffnung, zentriert um z = 0, Höhe h.
+ *   shape als Vektor [x,y]  -> quadratischer Ausschnitt
+ *   shape als Zahl d        -> Zylinder mit Durchmesser d
+ */
+module led_feature( shape, h ) {
+    if (is_list(shape))
+        cube([shape[0], shape[1], h], true);
+    else
+        cylinder(d = shape, h = h, center = true, $fn = 48);
+}
+
+/*
+ * Negativform der LED-Öffnung in kanonischer Lage:
+ *   Wandmitte liegt bei z = 0, die Wand (Dicke wall) reicht von -wall/2 bis +wall/2;
+ *   +z zeigt zur Lichtaustrittsseite (Dachoberseite).
+ *   through  = durchgehender Zylinder (Durchmesser) über die ganze Dachdicke
+ *   inner    = kleines Feature an der Lichtaustrittsseite, led_membrane (0.4mm) tief
+ *   outer    = LED-Tasche auf der Rauminnenseite, restliche Dachdicke
+ */
+module led_negative( wall, inner = undef, outer = undef, through = undef ) {
+    eps = 0.1 * wall; // Überstand gegen Rendering-Fehler an den Flächen
+    if (!is_undef(through))
+        cylinder(d = through, h = wall + 2*eps, center = true, $fn = 48);
+    if (!is_undef(inner))
+        translate([0, 0, (wall - led_membrane + eps)/2])
+            led_feature(inner, led_membrane + eps);
+    if (!is_undef(outer))
+        translate([0, 0, -led_membrane/2])
+            led_feature(outer, wall - led_membrane + 2*eps);
+}
+
+/*
+ * Negativform der LED-Öffnung nach Öffnungstyp (kanonische Lage, +z = Oberseite).
+ * wall = Dachdicke.
+ */
+module led_negative_by_type( led, wall ) {
+    if (led == LED_3MM)         led_negative(wall, through = 3);
+    else if (led == LED_5MM)    led_negative(wall, through = 5);
+    else if (led == LED_5050)   led_negative(wall, inner = 4,     outer = [6,6]);
+    else if (led == LED_3528)   led_negative(wall, inner = 3,     outer = [4,3]);
+    else if (led == LED_WS2812) led_negative(wall, inner = [6,6], outer = 11);
+}
+
 
 // ── Print-Offset ──────────────────────────────────────────────────────────────
 // print_offset = [vorne, rechts, hinten, links]
@@ -318,9 +377,16 @@ union() {
             licht_transform(l)
                 translate([l[0] - licht_w/2, l[1] - licht_d/2, room_height - dachwand - 0.1])
                     cube([licht_w, licht_d, dachwand + 0.2]);
+        // dach_cuts-Eintrag: [x, y, breite, tiefe] = Rechteck-Ausschnitt (Ecke x,y),
+        //                    [cx, cy, led]         = Öffnung nach LED-Typ (Mitte cx,cy)
         for (c = dach_cuts)
-            translate([c[0], c[1], room_height - dachwand - 0.1])
-                cube([c[2], c[3], dachwand + 0.2]);
+            if (len(c) >= 4)
+                translate([c[0], c[1], room_height - dachwand - 0.1])
+                    cube([c[2], c[3], dachwand + 0.2]);
+            else
+                translate([c[0], c[1], room_height - dachwand/2])
+                    rotate([180, 0, 0])
+                        led_negative_by_type(c[2], dachwand);
     }
 
     // Tunnel-Struktur für jeden Dachausschnitt
