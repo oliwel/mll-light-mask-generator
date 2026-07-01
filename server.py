@@ -94,7 +94,7 @@ LED_NAMES = {
     "5mm": 2,
     "plcc6": 3,   # LED_5050
     "plcc2": 4,   # LED_3528
-    "ws2811": 5,
+    "ws2812": 5
 }
 # Clip-Namen → CLIP_* Konstanten in lightbox.scad (optional, Standard: ohne)
 CLIP_NAMES = {"ohne": 0, "einfach": 1, "doppel": 2}
