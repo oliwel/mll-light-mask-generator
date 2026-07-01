@@ -116,6 +116,49 @@
     pointer-events: none;
   }
   #overlay.loading { color: #fff; }
+  #dims {
+    position: absolute;
+    left: 0.6rem;
+    bottom: 0.6rem;
+    z-index: 2;
+    display: none;
+    padding: 0.25rem 0.55rem;
+    border-radius: 4px;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 0.78rem;
+    font-family: monospace;
+    pointer-events: none;
+  }
+  #btn-measure {
+    position: absolute;
+    right: 0.6rem;
+    top: 0.6rem;
+    z-index: 2;
+    flex: none;
+    width: auto;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+  }
+  #btn-measure:hover { background: rgba(0,0,0,0.75); }
+  #btn-measure.active { background: #ffcc00; color: #222; }
+  #measure-label {
+    position: absolute;
+    z-index: 2;
+    display: none;
+    transform: translate(-50%, -140%);
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    background: #ffcc00;
+    color: #222;
+    font-size: 0.78rem;
+    font-weight: bold;
+    font-family: monospace;
+    white-space: nowrap;
+    pointer-events: none;
+  }
   #spinner {
     display: none;
     width: 20px;
@@ -205,6 +248,9 @@
       <div id="spinner"></div>
       <span id="overlay-text">Vorschau laden um das Modell anzuzeigen</span>
     </div>
+    <div id="dims"></div>
+    <button id="btn-measure" title="Zwei Punkte am Modell anklicken, um die Distanz zu messen">&#128207; Messen</button>
+    <div id="measure-label"></div>
   </div>
 </div>
 <footer class="footer">
@@ -277,9 +323,21 @@ function resize() {
 new ResizeObserver(resize).observe(container);
 resize();
 
+// Mess-Zustand: vor der Loop deklariert, da die Loop updateMeasureLabel()
+// bereits beim ersten (synchronen) Durchlauf aufruft.
+const raycaster = new THREE.Raycaster();
+const pointer   = new THREE.Vector2();
+const measurePts = [];
+const measureMarkers = [];
+let measureLine = null;
+let measureOn = false;
+const btnMeasure   = document.getElementById('btn-measure');
+const measureLabel = document.getElementById('measure-label');
+
 (function loop() {
   requestAnimationFrame(loop);
   controls.update();
+  updateMeasureLabel();
   renderer.render(scene, camera);
 })();
 
@@ -288,6 +346,7 @@ let mesh = null;
 let edges = null;
 let hadMesh = false;
 let currentBuffer = null;
+let modelR = 100;
 
 window._loadStlIntoViewer = function(buffer) {
   currentBuffer = buffer;
@@ -326,6 +385,15 @@ window._loadStlIntoViewer = function(buffer) {
   const center = box.getCenter(new THREE.Vector3());
   const size   = box.getSize(new THREE.Vector3());
   const r = Math.max(size.x, size.y, size.z);
+  modelR = r;
+
+  // Gesamtabmessungen (Weltachsen nach der Kippung: x=Breite, z=Tiefe, y=Höhe)
+  const dims = document.getElementById('dims');
+  dims.textContent =
+    `B ${size.x.toFixed(1)} × T ${size.z.toFixed(1)} × H ${size.y.toFixed(1)} mm`;
+  dims.style.display = 'block';
+
+  clearMeasure();  // laufende Messung beim Neuladen verwerfen
 
   const isFirstLoad = !hadMesh;
   if (isFirstLoad) {
@@ -343,6 +411,86 @@ window._loadStlIntoViewer = function(buffer) {
 };
 
 window._getCurrentBuffer = () => currentBuffer;
+
+// ── Messfunktion: zwei Punkte am Modell anklicken → Distanz in mm ──────────────
+// (Zustandsvariablen sind oben, vor der Render-Loop, deklariert.)
+function clearMeasure() {
+  measurePts.length = 0;
+  for (const m of measureMarkers) {
+    scene.remove(m);
+    m.geometry.dispose();
+    m.material.dispose();
+  }
+  measureMarkers.length = 0;
+  if (measureLine) {
+    scene.remove(measureLine);
+    measureLine.geometry.dispose();
+    measureLine.material.dispose();
+    measureLine = null;
+  }
+  measureLabel.style.display = 'none';
+}
+
+btnMeasure.addEventListener('click', () => {
+  measureOn = !measureOn;
+  btnMeasure.classList.toggle('active', measureOn);
+  container.style.cursor = measureOn ? 'crosshair' : '';
+  if (!measureOn) clearMeasure();
+});
+
+function addMeasurePoint(p) {
+  // Bei drittem Klick: neue Messung starten
+  if (measurePts.length === 2) clearMeasure();
+  measurePts.push(p.clone());
+
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(Math.max(modelR * 0.012, 0.4), 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffcc00, depthTest: false }),
+  );
+  marker.renderOrder = 999;
+  marker.position.copy(p);
+  scene.add(marker);
+  measureMarkers.push(marker);
+
+  if (measurePts.length === 2) {
+    measureLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(measurePts),
+      new THREE.LineBasicMaterial({ color: 0xffcc00, depthTest: false }),
+    );
+    measureLine.renderOrder = 999;
+    scene.add(measureLine);
+  }
+}
+
+// Klick von Drag unterscheiden, damit Drehen keinen Messpunkt setzt.
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  downXY = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const start = downXY;
+  downXY = null;
+  if (!measureOn || !mesh || !start) return;
+  if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 5) return;  // war ein Drag
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(mesh, true);
+  if (hits.length) addMeasurePoint(hits[0].point);
+});
+
+function updateMeasureLabel() {
+  if (measurePts.length < 2) return;
+  const a = measurePts[0], b = measurePts[1];
+  const mid = a.clone().add(b).multiplyScalar(0.5).project(camera);
+  const rect = renderer.domElement.getBoundingClientRect();
+  measureLabel.style.left = ((mid.x * 0.5 + 0.5) * rect.width) + 'px';
+  measureLabel.style.top  = ((-mid.y * 0.5 + 0.5) * rect.height) + 'px';
+  measureLabel.textContent = a.distanceTo(b).toFixed(1) + ' mm';
+  measureLabel.style.display = 'block';
+}
 </script>
 
 <script>
