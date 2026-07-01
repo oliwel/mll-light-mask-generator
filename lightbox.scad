@@ -88,12 +88,15 @@ module led_negative( inner = undef, outer = undef, through = undef ) {
 /*
  * Negativform der LED-Öffnung nach Öffnungstyp (kanonische Lage, +z = innen).
  */
-module led_negative_by_type( led ) {
+module led_negative_by_type( led, dist_ground ) {
     if (led == LED_3MM)         led_negative(through = 3);
     else if (led == LED_5MM)    led_negative(through = 5);
     else if (led == LED_5050)   led_negative(inner = 4,      outer = [6,6]);
     else if (led == LED_3528)   led_negative(inner = 3,      outer = [4,3]);
-    else if (led == LED_WS2812) led_negative(inner = [6,6],  outer = 11);
+    else if (led == LED_WS2812) {
+        led_negative(inner = [6,6],  outer = 11);
+        translate([0, -5.5, -led_membrane/2]) cube([6, dist_ground, 1.1 * wall - led_membrane ],true);
+    }
 }
 
 /*
@@ -106,9 +109,9 @@ module on_face( face, pos, width, height, depth ) {
     if (face == FACE_TOP)
         translate([pos[0], height/2 - wall/2, pos[1]]) rotate([90,0,0]) children();
     else if (face == FACE_RIGHT)
-        translate([width/2 - wall/2, pos[1], pos[0]]) rotate([0,-90,0]) children();
+        translate([width/2 - wall/2, pos[1], pos[0]]) rotate([0,-90,0]) rotate([0,0,-90]) children();
     else if (face == FACE_LEFT)
-        translate([-width/2 + wall/2, pos[1], pos[0]]) rotate([0,90,0]) children();
+        translate([-width/2 + wall/2, pos[1], pos[0]]) rotate([0,90,0]) rotate([0,0,90]) children();
 }
 
 /*
@@ -130,8 +133,8 @@ module clip_z( depth ) {
                 linear_extrude(height = clip_spacing+clip_thick)
                     polygon([[4, 0], [-4,0], [-1.5, 4], [1.5, 4]]);
         // Pod auf dem Druckbett (z = -depth/2), 3x3mm, verbessert die Haftung
-        translate([0, bar_y, -depth/2 + pod_h/2])
-            cube([3, 3, pod_h], true);
+        translate([0, bar_y + clip_thick/2, -depth/2 + pod_h/2])
+            cube([5, 5, pod_h], true);
     }
 }
 
@@ -148,29 +151,6 @@ module clip_on( face, perp, width, height, depth ) {
         translate([width/2, perp, 0]) rotate([0,0,-90]) clip_z(depth);
     else if (face == FACE_LEFT)
         translate([-width/2, perp, 0]) rotate([0,0,90]) clip_z(depth);
-}
-
-/*
- * Fasst LED-Öffnung (subtraktiv) und Halteclip(s) (additiv) zusammen und setzt
- * beide auf dieselbe Fläche an dieselbe Position. children(0) ist der Box-Körper.
- *   pos  = [u, v] LED-Mitte relativ zur Flächenmitte (mm)
- *   face = FACE_TOP | FACE_LEFT | FACE_RIGHT
- */
-module led_mount( led, clip, pos, face, width, height, depth ) {
-    // Clip-Versatz entlang der Achse senkrecht zu Z (= Achse, auf der die LED
-    // sitzt): X bei FACE_TOP (pos[0]), Y bei FACE_LEFT/RIGHT (pos[1]).
-    clip_perp = (face == FACE_TOP) ? pos[0] : pos[1];
-    union() {
-        difference() {
-            children(0);
-            on_face(face, pos, width, height, depth) led_negative_by_type(led);
-        }
-        if (clip == CLIP_SINGLE)
-            clip_on(face, clip_perp, width, height, depth);
-        else if (clip == CLIP_DOUBLE)
-            for (s = [-1, 1])
-                clip_on(face, clip_perp + s*clip_dist/2, width, height, depth);
-    }
 }
 
 /*
@@ -201,7 +181,7 @@ module lightbox_multi( width, height, depth, open = OPEN_NONE, leds = [] ) {
             lightbox_body(width, height, depth, open);
             for (m = leds)
                 on_face(m[0], [m[2], m[3]], width, height, depth)
-                    led_negative_by_type(m[1]);
+                    led_negative_by_type(m[1], depth/2 - m[2]);
         }
         for (m = leds) {
             face = m[0];
