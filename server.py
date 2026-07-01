@@ -855,7 +855,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8", errors="replace")
         return parse_qs(body).get("csv", [""])[0]
 
-    def _generate_stl(self, csv_content: str) -> tuple:
+    def _generate_model(self, csv_content: str, out_ext: str = "stl") -> tuple:
         try:
             sections  = validate_and_parse(csv_content)
             scad_data = generate_scad(sections)
@@ -868,7 +868,7 @@ class Handler(BaseHTTPRequestHandler):
 
         tmpdir = tempfile.mkdtemp(prefix="hausmaske_")
         try:
-            stl_path = os.path.join(tmpdir, "out.stl")
+            stl_path = os.path.join(tmpdir, f"out.{out_ext}")
             if is_box:
                 data_scad   = os.path.join(tmpdir, "box_data.scad")
                 renderer    = os.path.join(tmpdir, "lightbox.scad")
@@ -912,7 +912,21 @@ class Handler(BaseHTTPRequestHandler):
         if csv_content is None:
             return
 
-        stl_data, error = self._generate_stl(csv_content)
+        if self.path == "/export3mf":
+            data, error = self._generate_model(csv_content, "3mf")
+            if error:
+                self._send(422, "text/plain; charset=utf-8", error)
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "model/3mf")
+                self.send_header("Content-Disposition", 'attachment; filename="house_mask.3mf"')
+                self.send_header("Content-Length", str(len(data)))
+                self._security_headers()
+                self.end_headers()
+                self.wfile.write(data)
+            return
+
+        stl_data, error = self._generate_model(csv_content, "stl")
 
         if self.path == "/preview":
             if error:
