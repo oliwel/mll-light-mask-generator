@@ -193,7 +193,8 @@
   <div class="left">
     <div class="label-row">
       <label for="csv">Definition:</label>
-      <a onclick="loadSample()">Beispiel laden</a>
+      <a onclick="loadSample('mask')">Beispiel<b>maske</b> laden</a>
+      <a onclick="loadSample('box')">Beispiel<b>box</b> laden</a>
     </div>
     <textarea id="csv" placeholder="raum&#10;100,80,30&#10;vorne&#10;15,10,8,8&#10;…">{{csv}}</textarea>
     <div id="error-box"></div>
@@ -207,6 +208,7 @@
       <button class="btn-file" onclick="saveCsvFile()">&#128190; Speichern</button>
     </div>
     <input type="file" id="file-input" accept=".csv,.txt" style="display:none">
+    <div id="help-mask">
     <p class="hint"><b>Raum:</b> <code>raum</code><br>
       Format: Breite, Tiefe, Höhe<br>
       Optional: Offset/Stärke der Ausssenwand (alle/x,y/v,r,h,l)
@@ -241,6 +243,24 @@
       <code>innen/aussen</code>: Wandstärke Innen/Außenwände<br>
       <code>dach</code>: Wandstärke Dach
     </p>
+    </div>
+    <div id="help-box" style="display:none">
+    <p class="hint"><b>Lichtbox</b>: <code>box</code><br>
+      Format: Breite, Höhe, Tiefe
+    </p>
+    <p class="hint"><b>LED-Flächen</b>: <code>oben</code>, <code>links</code>, <code>rechts</code><br>
+      Eine LED = eine Zeile<br>
+      Format: Typ, (Clip), (Offset&nbsp;Breite), (Offset&nbsp;Tiefe)<br>
+      Ursprung: Mitte der Fläche
+    </p>
+    <p class="hint"><b>LED-Typen</b>:
+      <code>3mm</code>, <code>5mm</code>, <code>plcc6</code>, <code>plcc2</code>, <code>ws2812</code>
+    </p>
+    <p class="hint"><b>Clip</b> (optional):
+      <code>ohne</code>, <code>einfach</code>, <code>doppel</code><br>
+      Standard: <code>ohne</code>
+    </p>
+    </div>
     <p class="hint">Alle Angaben in Millimetern! Nachkommastellen sind mit Punkt als Trennzeichen möglich.</p>
   </div>
   <div class="right" id="viewer-container">
@@ -348,7 +368,8 @@ let hadMesh = false;
 let currentBuffer = null;
 let modelR = 100;
 
-window._loadStlIntoViewer = function(buffer) {
+window._loadStlIntoViewer = function(buffer, opts) {
+  const isBox = !!(opts && opts.box);
   currentBuffer = buffer;
   const geometry = loader.parse(buffer);
 
@@ -395,10 +416,12 @@ window._loadStlIntoViewer = function(buffer) {
 
   clearMeasure();  // laufende Messung beim Neuladen verwerfen
 
-  const isFirstLoad = !hadMesh;
-  if (isFirstLoad) {
-    controls.target.copy(center);
-    camera.position.set(center.x + r * 1.3, center.y + r * 0.9, center.z + r * 1.3);
+  // Box: Blick auf den Ursprung ausrichten; Maske: auf den Modell-Mittelpunkt
+  // (nur beim ersten Laden, damit ein manuell gewählter Blickwinkel erhalten bleibt).
+  const focus = isBox ? new THREE.Vector3(0, 0, 0) : center;
+  if (isBox || !hadMesh) {
+    controls.target.copy(focus);
+    camera.position.set(focus.x + r * 1.3, focus.y + r * 0.9, focus.z + r * 1.3);
   }
   camera.near = r / 200;
   camera.far  = r * 30;
@@ -506,11 +529,11 @@ function setLoading(on) {
   if (on) text.textContent = 'Generiere STL…';
 }
 
-const SAMPLE_CSV = `licht
-41,40,ende
-raum
+const SAMPLE_ROOM = `raum
 110,78,35
 2.5
+licht
+41,40,ende
 vorne
 16,15,12,15
 48,4,13,26
@@ -535,9 +558,38 @@ text
 Musterhaus
 `;
 
-function loadSample() {
-  document.getElementById('csv').value = SAMPLE_CSV;
+const SAMPLE_BOX = `box
+40,25,15
+oben
+plcc6
+3mm,-8
+5mm,8,1
+links
+ws2812, doppel, -2
+rechts
+plcc2, einfach, 4, -2
+`;
+
+function loadSample(variant) {
+  document.getElementById('csv').value = variant === 'box' ? SAMPLE_BOX : SAMPLE_ROOM;
+  updateHelp();
 }
+
+// Box-Modus, sobald irgendeine Zeile mit dem Schlüsselwort "box" beginnt
+// (analog zu _detect_box_mode im Server).
+function isBoxMode(csv) {
+  return csv.split('\n').some(line => line.trim().split(',')[0].trim().toLowerCase() === 'box');
+}
+
+// Hilfetext passend zum gewählten Schlüsselwort umschalten.
+function updateHelp() {
+  const box = isBoxMode(document.getElementById('csv').value);
+  document.getElementById('help-mask').style.display = box ? 'none' : '';
+  document.getElementById('help-box').style.display  = box ? '' : 'none';
+}
+
+document.getElementById('csv').addEventListener('input', updateHelp);
+updateHelp();
 
 // Beim Einfügen: Tabulatoren → Komma konvertieren (z. B. aus Tabellen) und
 // anschließend automatisch die Vorschau starten.
@@ -570,7 +622,7 @@ async function loadPreview() {
         '<div class="error">' + msg.replace(/</g, '&lt;') + '</div>';
       document.getElementById('overlay').style.display = 'none';
     } else {
-      window._loadStlIntoViewer(await resp.arrayBuffer());
+      window._loadStlIntoViewer(await resp.arrayBuffer(), { box: isBoxMode(csv) });
     }
   } catch (e) {
     document.getElementById('error-box').innerHTML =
@@ -588,7 +640,7 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = function(ev) { document.getElementById('csv').value = ev.target.result; };
+  reader.onload = function(ev) { document.getElementById('csv').value = ev.target.result; updateHelp(); };
   reader.readAsText(file);
   e.target.value = '';
 });
