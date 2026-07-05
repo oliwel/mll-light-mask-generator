@@ -102,40 +102,27 @@ module licht_transform(l) {
                 children();
 }
 
-// ── Wandöffnungen ─────────────────────────────────────────────────────────────
-// Koordinatenreferenz: linke untere Ecke von außen
-// w = [x_von_links, y_ab_boden, breite, hoehe]
-// Negativer x-Offset: von der gegenüberliegenden Seite, Referenzkante rechts/oben
-
-module front_cuts(windows) {
-    for (w = windows) {
-        x = w[0] >= 0 ? w[0] : room_width + w[0] - w[2];
-        translate([x, po_fr - 0.1, w[1]])
-            cube([w[2], aussenwand + 0.2, w[3]]);
-    }
-}
-
-module back_cuts(windows) {
-    for (w = windows) {
-        x = w[0] >= 0 ? room_width - w[0] - w[2] : -w[0] - w[2];
-        translate([x, room_depth - po_ba - aussenwand - 0.1, w[1]])
-            cube([w[2], aussenwand + 0.2, w[3]]);
-    }
-}
-
-module left_cuts(windows) {
-    for (w = windows) {
-        y = w[0] >= 0 ? room_depth - w[0] - w[2] : -w[0] - w[2];
-        translate([po_le - 0.1, y, w[1]])
-            cube([aussenwand + 0.2, w[2], w[3]]);
-    }
-}
-
-module right_cuts(windows) {
-    for (w = windows) {
-        y = w[0] >= 0 ? w[0] : room_depth + w[0] - w[2];
-        translate([room_width - po_ri - aussenwand - 0.1, y, w[1]])
-            cube([aussenwand + 0.2, w[2], w[3]]);
+// ── Außenwand mit Fensteröffnungen ─────────────────────────────────────────────
+// Eine einzige Funktion für alle vier Wände. Sie baut die Wand im lokalen
+// Wandkoordinatensystem und schneidet die Fenster relativ zum Wandursprung
+// (linke untere Ecke von außen). Der Aufrufer dreht die fertige Wand danach in
+// die globale Lage – die frühere fallweise Spiegelung entfällt dadurch.
+//
+// Lokales System:
+//   x = entlang der Wandlänge, x=0 an der Außen-Links-Ecke
+//   y = Wanddicke, y=0 = Außenfläche, +y ins Gebäudeinnere
+//   z = Höhe über Boden
+//   length          = Referenzlänge der Wand (volle Raumkante)
+//   inset_l/inset_r = Druckversatz an linker/rechter Wandkante (Panel-Verkürzung)
+//   windows         = [[x_von_links, y_ab_boden, breite, hoehe], ...]
+module wall_with_windows(length, inset_l, inset_r, windows) {
+    difference() {
+        translate([inset_l, 0, 0])
+            color([0,0,0.5])
+                cube([length - inset_l - inset_r, aussenwand, room_height]);
+        for (w = windows)
+            translate([w[0], -0.1, w[1]])
+                cube([w[2], aussenwand + 0.2, w[3]]);
     }
 }
 
@@ -343,31 +330,24 @@ translate([0, room_depth, 0]) rotate([180, 0, 0])
 difference() {
 union() {
 
-    // Außenwände – nur wenn Fenster/Türen vorhanden, sonst weggelassen
+    // Außenwände – je eine gedrehte Instanz der kanonischen Wand.
+    // Nur wenn Fenster/Türen vorhanden, sonst weggelassen.
+    // Vorne: Außen-Links-Ecke = Raumursprung, keine Drehung.
     if (len(front_windows) > 0)
-        difference() {
-            translate([po_le, po_fr, 0])
-                color([0,0,0.5]) cube([room_width - po_le - po_ri, aussenwand, room_height - dachwand]);
-            front_cuts(front_windows);
-        }
+        translate([0, po_fr, 0])
+            wall_with_windows(room_width, po_le, po_ri, front_windows);
+    // Hinten: um 180° gedreht (Außen-Links liegt bei +X/+Y).
     if (len(back_windows) > 0)
-        difference() {
-            translate([po_le, wall_back_inner, 0])
-                color([0,0,0.5]) cube([room_width - po_le - po_ri, aussenwand, room_height - dachwand]);
-            back_cuts(back_windows);
-        }
+        translate([room_width, room_depth - po_ba, 0]) rotate([0, 0, 180])
+            wall_with_windows(room_width, po_ri, po_le, back_windows);
+    // Links: um -90° gedreht (Außen-Links liegt bei +Y).
     if (len(left_windows) > 0)
-        difference() {
-            translate([po_le, po_fr, 0])
-                color([0,0,0.5]) cube([aussenwand, room_depth - po_fr - po_ba, room_height - dachwand]);
-            left_cuts(left_windows);
-        }
+        translate([po_le, room_depth, 0]) rotate([0, 0, -90])
+            wall_with_windows(room_depth, po_ba, po_fr, left_windows);
+    // Rechts: um +90° gedreht (Außen-Links liegt bei -Y).
     if (len(right_windows) > 0)
-        difference() {
-            translate([wall_right_inner, po_fr, 0])
-                color([0,0,0.5]) cube([aussenwand, room_depth - po_fr - po_ba, room_height - dachwand]);
-            right_cuts(right_windows);
-        }
+        translate([room_width - po_ri, 0, 0]) rotate([0, 0, 90])
+            wall_with_windows(room_depth, po_fr, po_ba, right_windows);
 
     // Dach mit Lichtöffnungen und Dachausschnitten
     difference() {
