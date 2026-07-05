@@ -239,87 +239,51 @@ module poly_walls_draw(polys) {
 }
 
 // ── Innenwände ────────────────────────────────────────────────────────────────
-// walls = [[pos, laenge], ...] — laenge=-1 → auto
-
-module walls_from_front(walls) {
-    for (w = walls) {
-        p   = w[0];
-        len = w[1];
-        if (len != -1) {
-            translate([p - innenwand/2, wall_front_inner, 0])
-                cube([innenwand, len, room_height]);
-        } else {
-            // Wand bis zum Randrahmen (licht_y), überlappt border-Vorderwand
-            translate([p - innenwand/2, wall_front_inner, 0])
-                cube([innenwand, licht_y - wall_front_inner, room_height]);
-            // Querelement bei Y=licht_y-innenwand von p nach licht_cx (verbindet center_fin)
-            x0 = min(p, licht_cx) - innenwand/2;
-            translate([x0, licht_y - innenwand, 0])
-                cube([abs(p - licht_cx) + innenwand, innenwand, room_height]);
-        }
+// walls = [[pos, laenge], ...] — laenge=-1 → auto (Wand bis zum Dach-Randrahmen
+// + Querelement zur Lichtmitte).
+//
+// Eine einzige kanonische Innenwand im lokalen System, analog zu den Außenwänden;
+// der Aufrufer platziert (dreht/spiegelt) sie pro Seite.
+//   X = Position entlang der Seite (Wanddicke innenwand um p)
+//   Y = Länge nach innen ab der Innenfläche der Außenwand (Y=0)
+//   Z = Höhe
+//   v_edge = Y-Abstand Innenfläche → naher Rand des Dachausschnitts (Auto-Modus)
+//   u_c    = Position der Lichtmitte entlang X (Auto-Querelement)
+module inner_wall(p, len, v_edge, u_c) {
+    if (len != -1) {
+        translate([p - innenwand/2, 0, 0])
+            cube([innenwand, len, room_height]);
+    } else {
+        // Hauptwand: von der Innenfläche (v=0, bündig/verschmelzend) bis zum
+        // Randrahmen. Kein Überstand in die Außenwand → ragt nie in ein Fenster.
+        translate([p - innenwand/2, 0, 0])
+            cube([innenwand, v_edge, room_height]);
+        // Querelement im Randrahmen-Streifen von p bis zur Lichtmitte
+        translate([min(p, u_c) - innenwand/2, v_edge - innenwand, 0])
+            cube([abs(p - u_c) + innenwand, innenwand, room_height]);
     }
 }
 
-module walls_from_back(walls) {
-    for (w = walls) {
-        p   = w[0];
-        len = w[1];
-
-        if (len != -1) {
-            translate([p - innenwand/2, wall_back_inner - len, 0])
-                cube([innenwand, len, room_height]);
-        } else {
-            // Wand bis zum hinteren Randrahmen, überlappt border-Hinterwand
-            eff = wall_back_inner - (licht_y + licht_d - innenwand);
-            translate([p - innenwand/2, licht_y + licht_d, 0])
-                cube([innenwand, eff, room_height]);
-            // Querelement bei Y=licht_y+licht_d von p nach licht_cx
-            x0 = min(p, licht_cx) - innenwand/2;
-            translate([x0, licht_y + licht_d, 0])
-                cube([abs(p - licht_cx) + innenwand, innenwand, room_height]);
-        }
-    }
-}
-
-module walls_from_left(walls) {
-    for (w = walls) {
-        p   = w[0];
-        len = w[1];
-        if (len != -1) {
-            translate([wall_left_inner, p - innenwand/2, 0])
-                cube([len, innenwand, room_height]);
-        } else {
-            // Wand bis linkem Randrahmen
-            eff = licht_x - wall_left_inner + innenwand;
-            translate([wall_left_inner - aussenwand, p - innenwand/2, 0])
-                cube([eff, innenwand, room_height]);
-            // Querelement bei X=licht_x-innenwand von p nach licht_cy
-            y0 = min(p, licht_cy) - innenwand/2;
-            translate([licht_x - innenwand, y0, 0])
-                cube([innenwand, abs(p - licht_cy) + innenwand, room_height]);
-        }
-    }
-}
-
-module walls_from_right(walls) {
-    for (w = walls) {
-        p   = w[0];
-        len = w[1];
-        if (len != -1) {
-            translate([wall_right_inner - len, p - innenwand/2, 0])
-                cube([len, innenwand, room_height]);
-        } else {
-            // Wand bis rechtem Randrahmen
-            eff = wall_right_inner - (licht_x + licht_w - innenwand);
-            translate([licht_x + licht_w, p - innenwand/2, 0])
-                cube([eff, innenwand, room_height]);
-            // Querelement bei X=licht_x+licht_w von p nach licht_cy
-            y0 = min(p, licht_cy) - innenwand/2;
-            translate([licht_x + licht_w, y0, 0])
-                cube([innenwand, abs(p - licht_cy) + innenwand, room_height]);
-
-        }
-    }
+// Platziert alle Innenwände einer Seite. face: 0=vorne,1=hinten,2=links,3=rechts.
+// vorne/rechts sind Rotationen, hinten/links Spiegelungen – die Position p wird
+// serverseitig bereits passend (invertiert) geliefert.
+module inner_walls_place(face, walls) {
+    if (face == 0)          // vorne: keine Drehung, nach innen = +Y
+        translate([0, wall_front_inner, 0])
+            for (w = walls)
+                inner_wall(w[0], w[1], licht_y - wall_front_inner, licht_cx);
+    else if (face == 1)     // hinten: an Y gespiegelt
+        translate([0, wall_back_inner, 0]) mirror([0, 1, 0])
+            for (w = walls)
+                inner_wall(w[0], w[1], wall_back_inner - (licht_y + licht_d), licht_cx);
+    else if (face == 2)     // links: X↔Y getauscht (Spiegelung)
+        translate([wall_left_inner, 0, 0]) mirror([1, 0, 0]) rotate([0, 0, 90])
+            for (w = walls)
+                inner_wall(w[0], w[1], licht_x - wall_left_inner, licht_cy);
+    else if (face == 3)     // rechts: 90°-Drehung
+        translate([wall_right_inner, 0, 0]) rotate([0, 0, 90])
+            for (w = walls)
+                inner_wall(w[0], w[1], wall_right_inner - (licht_x + licht_w), licht_cy);
 }
 
 // ── Hauptgeometrie ────────────────────────────────────────────────────────────
@@ -376,10 +340,10 @@ union() {
 
     // Innenwände
     color([0.5, 0.5, 0.8]) {
-        walls_from_front(front_walls);
-        walls_from_back(back_walls);
-        walls_from_left(left_walls);
-        walls_from_right(right_walls);
+        inner_walls_place(0, front_walls);
+        inner_walls_place(1, back_walls);
+        inner_walls_place(2, left_walls);
+        inner_walls_place(3, right_walls);
         poly_walls_draw(poly_walls);
     }
 
