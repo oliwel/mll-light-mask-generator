@@ -235,7 +235,12 @@
     </p>
     <p class="hint"><b>Wände</b>: <code>wand</code><br>
       Format: x_start, y_start, x_ecke1, y_ecke2,...<br>
-      Wand entlang mehrerer Punkte (max. 10)
+      Wand entlang mehrerer Punkte (max. 10)<br>
+      Nur ein Paar in der Zeile = Fortsetzung der vorigen Wand<br>
+      <code>x1,y1,name,x2,y2</code>: benannte gerade Wand<br>
+      oder zweizeilig: <code>x1,y1,name</code> / <code>x2,y2</code><br>
+      Der Name wird zum Schlüsselwort für Fenster (wie <code>vorne</code>):<br>
+      <code>name</code> + Zeilen <code>x,y,breite,höhe</code> (x ab Wandstart)
     </p>
     <p class="hint"><b>Druckparameter</b>: <code>druck</code><br>
       Format: keyword,wert(e)<br>

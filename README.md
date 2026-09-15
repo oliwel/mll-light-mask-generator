@@ -205,6 +205,36 @@ Auch hier messen negative Koordinaten von der rechten bzw. hinteren Raumkante.
 Die Wände können anhand der Außenmaße gesetzt werden, der Generator beschneidet
 die Länge automatisch an der Außenhülle der Maske.
 
+### Fenster in einer freien Wand
+
+Ein einzelnes **gerades** Segment eines Linienzugs lässt sich benennen und bekommt
+dann eigene Fenster – wie eine Außenwand. Der Name ist ein beliebiges Wort, das
+hinter dem **Startpunkt** des Segments steht; das Segment endet am nächsten Punkt.
+
+**Format:** `x1, y1, name, x2, y2` – oder zweizeilig, mit dem Endpunkt in der Folgezeile:
+
+```
+wand
+20,10,flur
+20,50
+```
+
+Der Name wird anschließend zum **Abschnitts-Schlüsselwort** für die Öffnungen. Sie
+werden wie bei den Außenwänden angegeben, der `Abstand` misst dabei ab dem
+Startpunkt der Wand (`x1, y1`):
+
+```
+flur
+5,0,8,12
+25,4,6,8
+```
+
+- Der Name darf kein reserviertes Schlüsselwort sein (`raum`, `wand`, `vorne`, …)
+  und nicht zweimal vergeben werden.
+- Benannt wird immer nur **ein** Segment, nicht der ganze Linienzug. Ein Linienzug
+  kann mehrere benannte Segmente enthalten.
+- Ohne zugehörigen Fenster-Abschnitt bleibt das Segment eine normale freie Wand.
+
 ---
 
 ##  Optional – Beschriftung (`text`)

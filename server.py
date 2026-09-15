@@ -10,7 +10,12 @@ CSV-Format:
   druck
   wand,0.8                        (Wandstärke; weitere Druckparameter als schluessel,wert)
   wand
-  x1,y1,x2,y2[,...,xn,yn]        (4–12 Werte: freie Innenwand als Eckpunktzug)
+  x1,y1,x2,y2[,...,xn,yn]        (freie Innenwand als Eckpunktzug, 2–10 Punktpaare)
+  x,y                            (nur ein Paar → Fortsetzung der vorigen wand-Zeile)
+  x1,y1,name,x2,y2               (optionaler Name → gerade "Fensterwand")
+  x1,y1,name / x2,y2             (dasselbe zweizeilig; Endpunkt in der Folgezeile)
+  <name>                         (Abschnitt für die benannte Wand)
+  x,y,breite,hoehe               (Fenster; x = Distanz ab Wandstart, wie vorne/hinten)
   vorne|hinten|links|rechts
   x,y,breite,hoehe                (Fenster/Tür – 4 Werte)
   pos                             (Innenwand-Ansatz – 1 Wert, auto-Länge)
@@ -262,6 +267,7 @@ def validate_and_parse(text: str) -> dict:
     sections: dict = {}
     current: str | None = None
     row_counts: dict[str, int] = {}
+    wall_names: set = set()  # benannte "wand"-Fensterwände; als Section-Keyword nutzbar
 
     for lineno, row in enumerate(csv_module.reader(io.StringIO(text)), start=1):
         row = [c.strip() for c in row]
@@ -297,18 +303,24 @@ def validate_and_parse(text: str) -> dict:
                 sections[current].append([keyword, parsed[0]])
                 row_counts[current] += 1
                 continue
-            if current == "text" and keyword not in KNOWN_SECTIONS:
+            if (current == "text" and keyword not in KNOWN_SECTIONS
+                    and keyword not in wall_names):
                 pass  # Textinhalt: nicht-numerische Zeile als Datum durchfallen lassen
-            elif keyword not in KNOWN_SECTIONS:
+            elif keyword not in KNOWN_SECTIONS and keyword not in wall_names:
                 errors.append(
                     f'Zeile {lineno}: Unbekanntes Schlüsselwort "{first}" - '
                     f"erlaubt: {', '.join(sorted(KNOWN_SECTIONS))}"
+                    + (f" oder Wandname: {', '.join(sorted(wall_names))}" if wall_names else "")
                 )
                 continue
             else:
+                # Keyword ∈ KNOWN_SECTIONS oder ein zuvor definierter Wandname
                 current = keyword
                 sections.setdefault(current, [])
                 row_counts.setdefault(current, 0)
+                # Jedes "wand"-Keyword beginnt einen neuen Polygonzug.
+                if keyword == "wand":
+                    sections["wand"].append({"pts": [], "names": {}})
                 continue
 
         if current is None:
@@ -416,6 +428,62 @@ def validate_and_parse(text: str) -> dict:
             sections[current].append([nums[0], nums[1], nums[2], nums[3]])
             continue
 
+        # wand-Abschnitt: ein "wand"-Keyword = ein Polygonzug; jede Datenzeile
+        # hängt Koordinatenpaare an. Ein Name-Token (nicht-numerisch) benennt das
+        # Segment, das am unmittelbar davor genannten Punkt beginnt – damit wird
+        # dieses einzelne (gerade) Segment zur "Fensterwand".
+        if current == "wand":
+            entry = sections["wand"][-1]
+            pend = None          # offener x-Wert eines noch unvollständigen Paares
+            line_err = None
+            for tok in values:
+                if _numeric(tok):
+                    if pend is None:
+                        pend = tok
+                    else:
+                        try:
+                            xy = _parse_values([pend, tok])
+                        except ValidationError as ex:
+                            line_err = str(ex); break
+                        entry["pts"].append([xy[0], xy[1]])
+                        pend = None
+                else:  # Name-Token
+                    if pend is not None:
+                        line_err = f'Name "{tok}" mitten in einem Koordinatenpaar'; break
+                    if not entry["pts"]:
+                        line_err = f'Name "{tok}" vor dem ersten Punkt'; break
+                    nm = tok.lower()
+                    if nm in KNOWN_SECTIONS or nm in wall_names:
+                        line_err = f'Wandname "{tok}" ist reserviert oder bereits vergeben'; break
+                    seg = len(entry["pts"]) - 1  # Segment ab dem zuletzt genannten Punkt
+                    if seg in entry["names"]:
+                        line_err = "Segment hat bereits einen Namen"; break
+                    entry["names"][seg] = nm
+                    wall_names.add(nm)
+            if line_err is None and pend is not None:
+                line_err = "ungerade Anzahl an Koordinaten (x,y-Paare erwartet)"
+            if line_err:
+                errors.append(f"Zeile {lineno}: {line_err}")
+            row_counts["wand"] += 1
+            continue
+
+        # Fensterwand: Abschnitt mit einem Wandnamen als Keyword; Fenster wie vorne/hinten
+        if current in wall_names:
+            if len(values) != 4:
+                errors.append(
+                    f'Zeile {lineno}: Fensterwand "{current}" erwartet 4 Werte '
+                    f"(x,y,breite,hoehe), gefunden: {len(values)}"
+                )
+                continue
+            bad = [v for v in values if not _numeric(v)]
+            if bad:
+                errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad)}")
+                continue
+            nums = _parse_values(values)
+            sections[current].append([nums[0], nums[1], nums[2], nums[3]])
+            row_counts[current] += 1
+            continue
+
         bad = [v for v in values if not _numeric(v)]
         if bad:
             errors.append(f"Zeile {lineno}: Nicht-numerische Werte: {', '.join(bad)}")
@@ -441,13 +509,6 @@ def validate_and_parse(text: str) -> dict:
                     f"gefunden: {count}"
                 )
                 continue
-        elif current == "wand":
-            if count % 2 != 0 or count < 4 or count > 20:
-                errors.append(
-                    f'Zeile {lineno}: Abschnitt "wand" erwartet 2 bis 10 Punktpaare'
-                    f"(x1,y1,x2,y2,...), gefunden: {count}"
-                )
-                continue
         elif current == "druck":
             pass  # handled above in non-numeric branch; numeric rows are invalid here
 
@@ -469,6 +530,15 @@ def validate_and_parse(text: str) -> dict:
             continue
 
         sections[current].append(_parse_values(values))
+
+    # Benannte Segmente brauchen einen Endpunkt (Segment seg = Punkt[seg]→[seg+1]).
+    for e in sections.get("wand", []):
+        npts = len(e["pts"])
+        for seg, nm in e["names"].items():
+            if seg + 1 >= npts:
+                errors.append(
+                    f'Fensterwand "{nm}": Segment unvollständig (kein Endpunkt)'
+                )
 
     if errors:
         raise ValidationError("\n".join(errors))
@@ -503,21 +573,28 @@ def _clip_segment(p1, p2, xmin, xmax, ymin, ymax):
     )
 
 
-def _clip_poly_walls(polys, xmin, xmax, ymin, ymax):
+def _clip_poly_wall(poly, xmin, xmax, ymin, ymax):
     """Clip each segment of every polyline; return list of clipped 2-point segments."""
-    out = []
-    for poly in polys:
-        for i in range(len(poly) - 1):
-            seg = _clip_segment(poly[i], poly[i + 1], xmin, xmax, ymin, ymax)
-            if seg:
-                out.append(list(seg))
-    return out
+    for i in range(len(poly) - 1):
+        seg = _clip_segment(poly[i], poly[i + 1], xmin, xmax, ymin, ymax)
+        if seg:
+            return list(seg)
+
 
 
 def _poly_walls_val(polys: list) -> str:
     def fmt_poly(pts):
         return "[" + ", ".join(f"[{p[0]},{p[1]}]" for p in pts) + "]"
     return "[" + ", ".join(fmt_poly(p) for p in polys) + "]"
+
+
+def _named_walls_val(walls: list) -> str:
+    """[[x1,y1],[x2,y2],[[x,z,w,h],...]] je benannter Fensterwand."""
+    def fmt(wall):
+        p1, p2, wins = wall
+        w = ", ".join(f"[{v[0]},{v[1]},{v[2]},{v[3]}]" for v in wins)
+        return f"[[{p1[0]},{p1[1]}],[{p2[0]},{p2[1]}],[{w}]]"
+    return "[" + ", ".join(fmt(x) for x in walls) + "]"
 
 
 def _vec(items: list) -> str:
@@ -729,12 +806,42 @@ def generate_scad(sections: dict) -> str:
     if geo_errors:
         raise ValidationError("\n".join(geo_errors))
 
-    poly_wall_rows = sections.get("wand", [])
-    poly_walls_raw = [
-        [_resolve_poly_point(row[i], row[i+1], w, d) for i in range(0, len(row), 2)]
-        for row in poly_wall_rows
-    ]
-    poly_walls = _clip_poly_walls(poly_walls_raw, po_le, w - po_ri, po_fr, d - po_ba)
+    # wand-Einträge: je Polygonzug jedes Segment einzeln behandeln. Benanntes
+    # Segment mit Fenster-Abschnitt → named_walls (gerade Fensterwand); alle
+    # übrigen Segmente → poly_walls (freie Innenwände, geklippt).
+    named_walls = []
+    poly_walls = []
+    geo_errors2 = []
+    for e in sections.get("wand", []):
+        pts = [_resolve_poly_point(p[0], p[1], w, d) for p in e["pts"]]
+        names = e["names"]
+        for i in range(len(pts) - 1):
+            seg = [pts[i], pts[i + 1]]
+            nm = names.get(i)
+            wins = sections.get(nm) if nm else None
+            if nm and wins:
+                (x1, y1), (x2, y2) = seg
+                wall_len = math.hypot(x2 - x1, y2 - y1)
+                for k, win in enumerate(wins, 1):
+                    wx, wz, ww, wh = win
+                    if wx < 0 or wx + ww > wall_len:
+                        geo_errors2.append(
+                            f'Fensterwand "{nm}" Öffnung {k}: {wx:.4g}–{wx+ww:.4g} '
+                            f"außerhalb der Wandlänge (0–{wall_len:.4g})"
+                        )
+                    if wz < 0 or wz + wh > room_h:
+                        geo_errors2.append(
+                            f'Fensterwand "{nm}" Öffnung {k}: Höhe {wz:.4g}–{wz+wh:.4g} '
+                            f"außerhalb (0–{room_h})"
+                        )
+                cords = _clip_poly_wall([seg[0], seg[1]], po_le, w - po_ri, po_fr, d - po_ba)
+                if cords:
+                    cords.append(wins)
+                    named_walls.append(cords)
+            else:
+                poly_walls.append(_clip_poly_wall(seg, po_le, w - po_ri, po_fr, d - po_ba))
+    if geo_errors2:
+        raise ValidationError("\n".join(geo_errors2))
 
     inner_w = w - po_le - po_ri
     inner_d = d - po_fr - po_ba
@@ -795,6 +902,7 @@ def generate_scad(sections: dict) -> str:
         f"innenwand    = {innenwand};",
         f"dachwand     = {dachwand};",
         f"poly_walls   = {_poly_walls_val(poly_walls)};",
+        f"named_walls  = {_named_walls_val(named_walls)};",
         f"print_offset = {_list1d(offset)};",
         f"front_windows = {_vec(front_wins)};",
         f"back_windows  = {_vec(back_wins)};",

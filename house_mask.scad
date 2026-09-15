@@ -238,6 +238,26 @@ module poly_walls_draw(polys) {
             wall_seg(poly[i], poly[i+1]);
 }
 
+// ── Benannte Fensterwände ───────────────────────────────────────────────────────
+// Freistehende gerade Wand p1→p2 (Dicke innenwand, volle Höhe) mit Fenstern.
+// Fenster: [x, z0, breite, hoehe] – x = Distanz entlang der Wand ab p1,
+// z0 = Höhe ab Boden; wie bei den Außenwänden vorne/hinten.
+// named_walls = [[[x1,y1],[x2,y2],[[x,z0,b,h],...]], ...]
+module named_wall(p1, p2, windows) {
+    dx = p2[0] - p1[0];
+    dy = p2[1] - p1[1];
+    len = sqrt(dx*dx + dy*dy);
+    translate([p1[0], p1[1], 0])
+        rotate([0, 0, atan2(dy, dx)])
+            translate([0, -innenwand/2, 0])
+                wall_with_windows(len, 0, 0, windows);
+}
+
+module named_walls_draw(walls) {
+    for (nw = walls)
+        named_wall(nw[0], nw[1], nw[2]);
+}
+
 // ── Innenwände ────────────────────────────────────────────────────────────────
 // walls = [[pos, laenge], ...] — laenge=-1 → auto (Wand bis zum Dach-Randrahmen
 // + Querelement zur Lichtmitte).
@@ -345,6 +365,7 @@ union() {
         inner_walls_place(2, left_walls);
         inner_walls_place(3, right_walls);
         poly_walls_draw(poly_walls);
+        named_walls_draw(is_undef(named_walls) ? [] : named_walls);
     }
 
     // Randrahmen für jeden Dachausschnitt
