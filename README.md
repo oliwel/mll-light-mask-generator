@@ -47,7 +47,10 @@ vorne
 
 - Werte werden durch **Komma** getrennt.
 - **Alle Maße in Millimetern.** Nachkommastellen mit Punkt schreiben (`2.5`, nicht `2,5`).
-- Die Reihenfolge der Abschnitte ist frei wählbar.
+  Jeder einzelne Wert muss zwischen `-9999` und `9999` liegen.
+- Die Reihenfolge der Abschnitte ist frei wählbar. Einzige Ausnahme: der
+  Fenster-Abschnitt einer [benannten Wand](#fenster-in-einer-freien-wand) muss
+  **nach** der `wand`-Zeile stehen, die den Namen vergibt.
 - Mit `#` beginnt ein **Kommentar** – sowohl als ganze Zeile als auch am Zeilenende:
 
 ```
@@ -112,18 +115,22 @@ raum
 ## Schritt 2 – Hausplatine platzieren (`licht`)
 
 Der `licht`-Abschnitt bestimmt, wo die Platine sitzt. Die Platinenaufnahme hat ein
-festes Format von **41 × 36 mm** und muss mit etwas Abstand vollständig innerhalb
-der Maske liegen.
+festes Format von **41 × 36 mm** und muss mit mindestens **2 mm** Abstand
+vollständig innerhalb der Maske liegen.
 
-**Format:** `Mitte-X, Mitte-Y [, Rotation] [, Schalter]`
+**Format:** `Mitte-X, Mitte-Y [, Rotation] [, Schalter] [, Anschluss]`
 
 - `Mitte-X, Mitte-Y` = Koordinaten des **Platinenmittelpunkts** (vom Ursprung vorne links).
-- `Rotation` (optional) = Drehung in Grad: `90`, `180`, `-90`.
+- `Rotation` (optional) = Drehung in Grad: `90`, `180`, `-90` (wird über Stockwerk gesteuert).
 - `Schalter` (optional) = Position des Schalterausschnitts: `weiter` oder `ende`.
+- `Anschluss` (optional) = Schlüsselwort: `idc` IDC-Buchse wird mitgedruckt, `stack` (optional) druckt die Führung für die Platinenverbinder, beides wird im Normalfall über Stockwerk gesteuert.
+
+Werden beide Schlüsselwörter angegeben, steht `Schalter` **vor** `Anschluss`:
+`41,40,ende,idc` ist gültig, `41,40,idc,ende` nicht.
 
 ```
 licht
-41,40,ende
+41,40,ende,idc
 ```
 
 Weitere Möglichkeiten:
@@ -131,6 +138,30 @@ Weitere Möglichkeiten:
 - **Automatisch zentrieren:** Abschnitt `licht` ohne Werte (oder eine einzelne `0`)
   schreiben – die Platine wird mittig im Raum platziert.
 - **Keine Platine:** den `licht`-Abschnitt komplett weglassen.
+
+### Gestapelte Räume (`G<n>`)
+
+Werden mehrere Räume übereinander gestapelt, bekommt der `licht`-Abschnitt eine
+eigene Zeile `G<n>` mit der Stockwerksnummer (`G0` = Erdgeschoss, einstellig).
+Sie gilt für alle Platinen des Abschnitts und setzt automatisch:
+
+- jedes **ungerade** Stockwerk wird um 180° gedreht, damit die Anschlüsse
+  abwechselnd liegen,
+- ab `G1` nur die Grundplatte am unteren Tunnelende (ohne Steckertasche), damit
+  die Räume aufeinander passen,
+- die Ziffer wird in die **vordere rechte Ecke** des Dachs graviert, sodass am
+  gedruckten Teil ablesbar ist, zu welchem Stockwerk es gehört,
+- in die vier **Dachecken** kommt je eine quadratische Aussparung von 2 mm
+  Kantenlänge; ab `G1` sitzt an den unteren Ecken ein passender Zapfen, der
+  außen bündig mit der Wand abschließt. Aufeinandergesetzt rasten die Räume
+  darüber ineinander ein. An einer Ecke, an der beide angrenzenden Außenwände
+  fehlen (Wand ohne Öffnungen), entfällt der Zapfen.
+
+```
+licht
+G1
+41,40,ende
+```
 
 > [!INFO] Unter der Platine wird immer der Tunnel für den Anschluß und vier
 > Wandstücke bis an den Dachausschnitt eingefügt.
@@ -179,9 +210,9 @@ in der Zeile stehen:
 
 ```
 hinten
-15,4,22.5,26     ← Fenster (4 Werte)
-72.5,4,22.5,26   ← Fenster (4 Werte)
-42               ← automatische Trennwand bei Position 42
+15,4,22.5,26     # Fenster (4 Werte)
+72.5,4,22.5,26   # Fenster (4 Werte)
+42               # automatische Trennwand bei Position 42
 ```
 
 Ein negativer Positionswert misst wieder von der gegenüberliegenden Ecke.
@@ -194,7 +225,10 @@ Für Innenwände, die nicht an einer Außenwand beginnen, gibt es den `wand`-Abs
 Eine Zeile beschreibt einen **Linienzug** aus Eckpunkten – die Wand verläuft von Punkt
 zu Punkt.
 
-**Format:** `x1, y1, x2, y2 [, x3, y3, …]` (2 bis 10 Punkte)
+**Format:** `x1, y1, x2, y2 [, x3, y3, …]` (mindestens 2 Punkte, nach oben offen)
+
+Die Punkte dürfen auch über mehrere Zeilen verteilt werden – jede weitere Zeile
+setzt denselben Linienzug fort. Ein neuer `wand`-Abschnitt beginnt einen neuen Zug.
 
 ```
 wand
@@ -231,9 +265,13 @@ flur
 
 - Der Name darf kein reserviertes Schlüsselwort sein (`raum`, `wand`, `vorne`, …)
   und nicht zweimal vergeben werden.
+- Der Fenster-Abschnitt muss **nach** der `wand`-Zeile stehen, die den Namen
+  vergibt – sonst ist der Name noch unbekannt und die Datei wird abgewiesen.
 - Benannt wird immer nur **ein** Segment, nicht der ganze Linienzug. Ein Linienzug
   kann mehrere benannte Segmente enthalten.
 - Ohne zugehörigen Fenster-Abschnitt bleibt das Segment eine normale freie Wand.
+- Anders als bei den Außenwänden ist der `Abstand` hier immer positiv; negative
+  Werte werden nicht von der Gegenecke gemessen, sondern abgewiesen.
 
 ---
 
@@ -254,6 +292,13 @@ text
 Musterhaus
 ```
 
+Zwei Einschränkungen ergeben sich aus dem CSV-Format: Der Text darf **kein Komma**
+enthalten (es trennt die Felder), und er darf nicht genauso heißen wie ein
+Abschnitts-Schlüsselwort oder eine benannte Wand – ein solches Wort beendet den
+`text`-Abschnitt, statt als Beschriftung zu gelten.
+
+---
+
 ## Optional – Dachöffnungen (`dach`)
 
 Zusätzliche Öffnungen in der Dachfläche, z. B. für Dachfenster oder zum Einbau weiterer LEDs von oben.
@@ -262,7 +307,7 @@ Zusätzliche Öffnungen in der Dachfläche, z. B. für Dachfenster oder zum Einb
 - `X, Y, Breite, Tiefe` – rechteckiger Ausschnitt (Ecke bei X,Y, Ursprung vorne links)
 - `X, Y, <LED-Typ>` – Öffnung passend zu einem LED-Typ (Mitte bei X,Y); die Geometrie
   wird wie in der Lichtbox erzeugt. Anstelle der Ausschnitt-Masse wird der Name des
-  LED-Typs angegeben: `none`, `3mm`, `5mm`, `plcc6`, `plcc2`, `ws2812`.
+  LED-Typs angegeben: `none` (auch `keine`), `3mm`, `5mm`, `plcc6`, `plcc2`, `ws2812`.
 
 ```
 dach
@@ -291,11 +336,65 @@ dach,1.2
 
 ---
 
+## Lichtbox-Modus (`box`)
+
+Statt einer kompletten Hausmaske (`raum`) lässt sich auch eine einzelne **Lichtbox**
+erzeugen – ein kleiner Kasten, der über eine LED gestülpt wird und das Licht
+gerichtet abgibt. Sobald das Schlüsselwort `box` in der Konfiguration vorkommt,
+schaltet der Generator auf den Lichtbox-Renderer (`lightbox.scad`) um; `box` und
+`raum` schließen sich gegenseitig aus.
+
+**Erste Zeile – Außenmaße (Pflicht):** `Breite, Höhe, Tiefe`
+
+```
+box
+40,25,15
+```
+
+### LED-Öffnungen (`oben`, `links`, `rechts`)
+
+Die Schlüsselwörter `oben`, `links` und `rechts` setzen je eine (oder mehrere)
+LED-Öffnung auf die entsprechende Fläche. Jede Öffnung ist eine eigene Zeile, die
+mit dem **LED-Typ** beginnt:
+
+| LED-Typ | Bedeutung |
+|---------|-----------|
+| `none` (auch `keine`) | keine Öffnung |
+| `3mm` | durchgehende Bohrung 3 mm |
+| `5mm` | durchgehende Bohrung 5 mm |
+| `plcc6` | PLCC6 (innen 4 mm, außen 6×6 mm) |
+| `plcc2` | PLCC2 (innen 3 mm, außen 4×3 mm) |
+| `ws2812` | innen 6×6 mm, außen 15 mm |
+
+**Format:** `<typ> [, <clip>] [, offset_breite [, offset_tiefe]]`
+
+- Nur `<typ>` → LED **mittig** auf der Fläche.
+- `<clip>` (optional, 2. Argument) → Halteclip: `ohne`, `einfach` oder `doppel`.
+  Standard ist `ohne` und kann weggelassen werden.
+- `offset_breite` → Verschiebung **entlang der Vorderkante** der Fläche.
+- `offset_tiefe` → zusätzliche Verschiebung **in Tiefenrichtung (Z)**.
+
+Die Offsets messen von der **Flächenmitte** aus und dürfen der Kante nicht näher
+als **5 mm** kommen.
+
+```
+box
+40,25,15
+oben
+plcc6, doppel
+links
+ws2812, 4
+rechts
+plcc2, einfach, 4, -2
+```
+
+---
+
 ## Vollständiges Beispiel
 
 ```
 licht
-41,40,ende
+41,40,ende,idc
 raum
 110,78,35
 2.5
@@ -322,3 +421,29 @@ dach
 text
 Musterhaus
 ```
+
+---
+
+## Anhang – Generator starten
+
+Der Generator ist ein kleiner Webserver, der OpenSCAD zum Rendern aufruft. Beides
+muss lokal installiert sein.
+
+```
+python3 server.py
+```
+
+Danach ist die Oberfläche unter **http://localhost:8080** erreichbar. Sie lädt die
+Vorschau über `POST /preview` und liefert die Downloads über `POST /` (STL) und
+`POST /export3mf` (3MF).
+
+Ohne Oberfläche lässt sich eine Konfiguration auch direkt übersetzen – die Ausgabe
+ist das Datenfile, das `house_mask.scad` einliest:
+
+```
+python3 server.py --parse meine_maske.csv > house_data.scad
+```
+
+Mit `--debug` schreibt der Server zusätzlich das Datenfile jeder Anfrage auf die
+Konsole – hilfreich, um nachzusehen, was aus einer Konfiguration tatsächlich
+geworden ist.

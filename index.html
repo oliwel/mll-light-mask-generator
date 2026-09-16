@@ -65,7 +65,7 @@
     border-radius: 4px;
     resize: none;
   }
-  .hint { color: #666; font-size: 0.82rem; line-height: 1.5; }
+  .hint { color: #666; font-size: 0.82rem; line-height: 1.5; margin-top: 0.5em;}
   .hint code { background: #e0e0e0; padding: 0 3px; border-radius: 2px; }
   .error {
     background: #fdecea;
@@ -211,15 +211,16 @@
     <div id="help-mask">
     <p class="hint"><b>Raum:</b> <code>raum</code><br>
       Format: Breite, Tiefe, Höhe<br>
-      Optional: Offset/Stärke der Ausssenwand (alle/x,y/v,r,h,l)
+      Optional: Offset/Stärke der Außenwand (alle / v+h,r+l / v,r,h,l)
     </p>
     <p class="hint"><b>Hausplatine</b>: <code>licht</code><br>
-      Format: offset_x, offset_y, (rotation), (schalter)<br>
-      Urspung: vorne links zur Mitte der Platine!<br>
+      <i>Für mehrstöckige Häuser: Stockwerkangabe <code>G&lt;n&gt;</code> als eigene Zeile (G0 = Erdgeschoss)</i><br>
+      Format: offset_x, offset_y, (schalter), (anschluss)<br>
+      Ursprung: vorne links zur Mitte der Platine!<br>
       Ohne Werte: zentriert<br>
-      Rotation in Grad (90,180,-90)<br>
       Schalterposition: <code>weiter</code>, <code>ende</code><br>
-      Keyword weglassen = keine Platine<br>
+      Anschluss: <code>idc</code> IDC Buchse<br>
+      Abschnitt weglassen = keine Platine<br>
     </p>
     <p class="hint"><b>Fenster</b>: <code>vorne</code>, <code>hinten</code>, <code>links</code>, <code>rechts</code>, <br>
       Eine Öffnung = eine Zeile<br>
@@ -227,23 +228,21 @@
       Ursprung je Wand unten, links<br>
       Einzelne Zahl = Trennwand (automatisch)<br>
       Zwei Zahlen = Trennwand mit Länge<br>
-      Keine Fenster = keine Wand! Massive Wand mit Fenster <code>0,0,0,0</code>
+      Keine Fenster = keine Wand!<br>
+      Massive Wand ohne Fenster <code>0,0,0,0</code>
     </p>
     <p class="hint"><b>Dach</b>: <code>dach</code><br>
       Öffnungen wie Fenster, Ursprung vorne, links<br>
-      Alternativ: <code>plcc2</code>, <code>plcc6</code>, <code>ws2812</code>, <code>3mm</code>, <code>5mm</code>
+      Alternativ: <code>plcc2</code>, <code>plcc6</code>, <code>ws2812</code>, <code>3mm</code>, <code>5mm</code>, <code>none</code>
     </p>
     <p class="hint"><b>Wände</b>: <code>wand</code><br>
-      Format: x_start, y_start, x_ecke1, y_ecke2,...<br>
-      Wand entlang mehrerer Punkte (max. 10)<br>
+      Format: x_start, y_start, x_ecke1, y_ecke1,...<br>
+      Wand entlang mehrerer Punkte<br>
       Nur ein Paar in der Zeile = Fortsetzung der vorigen Wand<br>
-      <code>x1,y1,name,x2,y2</code>: benannte gerade Wand<br>
-      oder zweizeilig: <code>x1,y1,name</code> / <code>x2,y2</code><br>
-      Der Name wird zum Schlüsselwort für Fenster (wie <code>vorne</code>):<br>
-      <code>name</code> + Zeilen <code>x,y,breite,höhe</code> (x ab Wandstart)
+      x1,y1,name,x2,y2 = benannte Wand<br>
     </p>
     <p class="hint"><b>Druckparameter</b>: <code>druck</code><br>
-      Format: keyword,wert(e)<br>
+      Format: keyword,wert<br>
       <code>wand</code>: Wandstärke<br>
       <code>innen/aussen</code>: Wandstärke Innen/Außenwände<br>
       <code>dach</code>: Wandstärke Dach
@@ -259,7 +258,7 @@
       Ursprung: Mitte der Fläche
     </p>
     <p class="hint"><b>LED-Typen</b>:
-      <code>3mm</code>, <code>5mm</code>, <code>plcc6</code>, <code>plcc2</code>, <code>ws2812</code>
+      <code>3mm</code>, <code>5mm</code>, <code>plcc6</code>, <code>plcc2</code>, <code>ws2812</code>, <code>none</code>
     </p>
     <p class="hint"><b>Clip</b> (optional):
       <code>ohne</code>, <code>einfach</code>, <code>doppel</code><br>
@@ -538,7 +537,7 @@ const SAMPLE_ROOM = `raum
 110,78,35
 2.5
 licht
-41,40,ende
+41,40,ende,idc
 vorne
 16,15,12,15
 48,4,13,26

@@ -10,18 +10,27 @@ CSV-Format:
   druck
   wand,0.8                        (Wandstärke; weitere Druckparameter als schluessel,wert)
   wand
-  x1,y1,x2,y2[,...,xn,yn]        (freie Innenwand als Eckpunktzug, 2–10 Punktpaare)
+  x1,y1,x2,y2[,...,xn,yn]        (freie Innenwand als Eckpunktzug, beliebig viele Punktpaare)
   x,y                            (nur ein Paar → Fortsetzung der vorigen wand-Zeile)
   x1,y1,name,x2,y2               (optionaler Name → gerade "Fensterwand")
   x1,y1,name / x2,y2             (dasselbe zweizeilig; Endpunkt in der Folgezeile)
   <name>                         (Abschnitt für die benannte Wand)
-  x,y,breite,hoehe               (Fenster; x = Distanz ab Wandstart, wie vorne/hinten)
+  x,y,breite,hoehe               (Fenster; x = Distanz ab Wandstart, hier ohne negative Werte)
   vorne|hinten|links|rechts
   x,y,breite,hoehe                (Fenster/Tür – 4 Werte)
   pos                             (Innenwand-Ansatz – 1 Wert, auto-Länge)
   pos,laenge                      (Innenwand mit expliziter Länge – 2 Werte)
   licht
-  x,y[,rotation][,weiter|ende]   (2–3 Werte, absolut vom Körperursprung 0,0; negativ = von rechts/hinten)
+  x,y[,rotation][,weiter|ende][,idc|stack]
+                                 (2–3 Werte, absolut vom Körperursprung 0,0; negativ = von rechts/hinten;
+                                  "idc" als letztes Feld → IDC-Buchse mit Steckertasche,
+                                  "stack" → nur Grundplatte am unteren Tunnelende)
+  G<n>                           (eigene Zeile, Stockwerk 0–9 beim Stapeln; gilt für alle
+                                  Lichtblöcke des Abschnitts: ungerades n → Rotation 180,
+                                  n > 0 → "stack", Ziffer wird in die vordere rechte Ecke
+                                  graviert, Dachecken bekommen Stapelaussparungen und ab
+                                  n > 0 die unteren Ecken passende Zapfen.
+                                  Angaben in der Datenzeile haben Vorrang.)
   dach
   x,y,breite,tiefe               (4 Werte: Rechteck-Ausschnitt, Ecke x,y, absolut vom Körperursprung 0,0)
   x,y,<ledtyp>                   (3 Werte: Öffnung nach LED-Typ, Mitte x,y; ledtyp ∈ {none,3mm,5mm,plcc6,plcc2,ws2812})
@@ -42,7 +51,8 @@ Lichtbox-Modus (Schlüsselwort "box", schließt "raum" aus → Renderer lightbox
   clip    ∈ {ohne, einfach, doppel}  (Standard: ohne, weglassbar)
 
 Standalone: python3 server.py --parse sample.csv > house_data.scad
-Server:     python3 server.py
+Server:     python3 server.py [--debug]
+            --debug schreibt das erzeugte Datenfile jeder Anfrage auf die Konsole
 """
 
 import csv as csv_module
@@ -51,6 +61,7 @@ import io
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -65,6 +76,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 MAX_BODY = 4 * 1024  # 4 KB
+
+DEBUG = False  # --debug: erzeugtes Datenfile auf die Konsole schreiben
 
 _rate_lock = threading.Lock()
 _rate_data: dict[str, list[float]] = defaultdict(list)
@@ -111,7 +124,7 @@ _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]"},
     "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
-    "licht":  {"hint": "x,y[,rotation][,weiter|ende]"},
+    "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]  |  G<n>"},
     "dach":   {"hint": "x,y,breite,tiefe  |  x,y,<ledtyp>"},
     "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
     "vorne":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
@@ -119,6 +132,10 @@ _RULES = {
     "links":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
     "rechts": {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
 }
+
+# Stockwerks-Zeile "G<n>" im licht-Abschnitt (Vorgabe für Rotation, stack und Gravur)
+_FLOOR_RE = re.compile(r"^[gG](\d+)$")
+_FLOOR_MAX = 9  # die Gravur ist auf eine Ziffer ausgelegt
 
 
 # ── Validation & Parsing ──────────────────────────────────────────────────────
@@ -155,6 +172,12 @@ def _clean_row(row: list[str]) -> list[str]:
             head = c[:hpos].strip()
             return row[:i] + ([head] if head else [])
     return row
+
+
+def _floor_of(sections: dict) -> int | None:
+    """Stockwerk aus der "G<n>"-Zeile des licht-Abschnitts; None = nicht angegeben."""
+    rows = sections.get("licht_geschoss")
+    return rows[0][0] if rows else None
 
 
 def _detect_box_mode(text: str) -> bool:
@@ -303,6 +326,22 @@ def validate_and_parse(text: str) -> dict:
                 sections[current].append([keyword, parsed[0]])
                 row_counts[current] += 1
                 continue
+            # Stockwerks-Zeile "G<n>" im licht-Abschnitt — ebenfalls vor der Keyword-Prüfung.
+            floor_match = _FLOOR_RE.match(first) if current == "licht" else None
+            if floor_match and len(values_all) == 1:
+                floor = int(floor_match.group(1))
+                if floor > _FLOOR_MAX:
+                    errors.append(
+                        f'Zeile {lineno}: Stockwerk "{first}" zu groß - '
+                        f"erlaubt sind einstellige Werte (G0–G{_FLOOR_MAX})"
+                    )
+                elif "licht_geschoss" in sections:
+                    errors.append(
+                        f'Zeile {lineno}: Abschnitt "licht" erlaubt nur eine Stockwerks-Zeile'
+                    )
+                else:
+                    sections["licht_geschoss"] = [[floor]]
+                continue
             if (current == "text" and keyword not in KNOWN_SECTIONS
                     and keyword not in wall_names):
                 pass  # Textinhalt: nicht-numerische Zeile als Datum durchfallen lassen
@@ -332,21 +371,28 @@ def validate_and_parse(text: str) -> dict:
         # licht-Abschnitt: optionales Keyword als letztes Feld; "0" = automatisch
         if current == "licht":
             _SLOT_KW = {"weiter": 1, "ende": 2}
+            _IDC_KW = {"idc": 1, "stack": 2}
             slot_mode = 0
+            # None = nicht angegeben; die Stockwerks-Zeile "G<n>" füllt solche Felder
+            # nach der Schleife auf, angegebene Werte bleiben unangetastet.
+            idc = None  # Buchse nur bei angehängtem Schlüsselwort "idc"/"stack"
             vals = list(values)
+            if vals and vals[-1].lower() in _IDC_KW:
+                idc = _IDC_KW[vals[-1].lower()]
+                vals = vals[:-1]
             if vals and vals[-1].lower() in _SLOT_KW:
                 slot_mode = _SLOT_KW[vals[-1].lower()]
                 vals = vals[:-1]
             # Einzelner Wert "0" → Autopositionierung für beide Achsen
             if vals == ["0"]:
                 row_counts[current] += 1
-                sections[current].append([0, 0, 0, slot_mode])
+                sections[current].append([0, 0, None, slot_mode, idc])
                 continue
             count = len(vals)
             if count not in {2, 3}:
                 errors.append(
                     f'Zeile {lineno}: Abschnitt "licht" erwartet 2 oder 3 Werte '
-                    f"(x,y[,rotation][,weiter|ende]), gefunden: {count}"
+                    f"(x,y[,rotation][,weiter|ende][,idc|stack]), gefunden: {count}"
                 )
                 continue
             bad_licht = [v for v in vals if not _numeric(v)]
@@ -358,7 +404,7 @@ def validate_and_parse(text: str) -> dict:
             row_counts[current] += 1
             nums = _parse_values(vals)
             sections[current].append(
-                [nums[0], nums[1], nums[2] if len(nums) >= 3 else 0, slot_mode]
+                [nums[0], nums[1], nums[2] if len(nums) >= 3 else None, slot_mode, idc]
             )
             continue
 
@@ -540,6 +586,16 @@ def validate_and_parse(text: str) -> dict:
                     f'Fensterwand "{nm}": Segment unvollständig (kein Endpunkt)'
                 )
 
+    # Nicht angegebene licht-Felder aus dem Stockwerk auffüllen: jedes ungerade
+    # Stockwerk dreht die Platine um 180°, jedes Stockwerk über dem Erdgeschoss
+    # bekommt "stack". Angaben aus der Datenzeile haben Vorrang.
+    floor = _floor_of(sections) or 0
+    for row in sections.get("licht", []):
+        if row[2] is None:
+            row[2] = 180 if floor % 2 else 0
+        if row[4] is None:
+            row[4] = 2 if floor > 0 else 0
+
     if errors:
         raise ValidationError("\n".join(errors))
 
@@ -665,6 +721,10 @@ def _normalize_offset(offset_row: list | None) -> list:
 
 _LICHT_W = 41
 _LICHT_D = 36
+
+# Gravur der Stockwerksnummer: Rand zur Dachkante und Ziffernbreite bei size=5
+_FLOOR_LABEL_MARGIN = 2
+_FLOOR_LABEL_W = 3
 
 
 def _resolve_licht_coord(offset, outer_size):
@@ -868,11 +928,16 @@ def generate_scad(sections: dict) -> str:
     lx_auto = max(po_le + _LICHT_W / 2, min(lx_auto, w - po_ri - _LICHT_W / 2))
     ly_auto = max(po_fr + _LICHT_D / 2, min(ly_auto, d - po_ba - _LICHT_D / 2))
 
+    floor = _floor_of(sections)
+
     licht_rows = sections.get("licht")
     if licht_rows is None:
         licht_val = "[]"
     elif len(licht_rows) == 0:
-        licht_val = f"[[{lx_auto},{ly_auto},0,0]]"
+        # Abschnitt ohne Datenzeilen (ggf. nur mit "G<n>") → zentrierte Platine
+        auto_rot = 180 if floor and floor % 2 else 0
+        auto_idc = 2 if floor else 1
+        licht_val = f"[[{lx_auto},{ly_auto},{auto_rot},0,{auto_idc}]]"
     else:
         # Mittelpunkt des Ausschnitts; 0 = automatisch; negativ = Abstand von rechts/hinten
         entries = [
@@ -881,6 +946,7 @@ def generate_scad(sections: dict) -> str:
                 ly_auto if row[1] == 0 else _resolve_licht_coord(row[1], d),
                 row[2],
                 row[3],
+                row[4],
             ]
             for row in licht_rows
         ]
@@ -889,7 +955,17 @@ def generate_scad(sections: dict) -> str:
     # dach-Eintrag: [x,y,breite,tiefe] (Rechteck) oder [cx,cy,led] (LED-Typ)
     dach_cuts = [list(row) for row in sections.get("dach", [])]
 
-    text_rows = sections.get("text", [])
+    text_rows = list(sections.get("text", []))
+    if floor is not None:
+        # Stockwerksnummer in die vordere rechte Ecke der Dachfläche gravieren;
+        # text() setzt an der Grundlinie links an, deshalb um eine Ziffernbreite
+        # von der rechten Kante einrücken.
+        text_rows.append([
+            str(floor),
+            w - po_ri - _FLOOR_LABEL_MARGIN - _FLOOR_LABEL_W,
+            po_fr + _FLOOR_LABEL_MARGIN,
+            0,
+        ])
 
     lines = [
         f"room_width   = {w};",
@@ -908,6 +984,7 @@ def generate_scad(sections: dict) -> str:
         f"back_windows  = {_vec(back_wins)};",
         f"left_windows  = {_vec(left_wins)};",
         f"right_windows = {_vec(right_wins)};",
+        f"geschoss = {-1 if floor is None else floor};",
         f"licht = {licht_val};",
         f"dach_cuts = {_vec(dach_cuts)};",
         f"front_walls = {_vec(front_walls)};",
@@ -990,6 +1067,9 @@ class Handler(BaseHTTPRequestHandler):
 
             with open(data_scad, "w", encoding="utf-8") as f:
                 f.write(scad_data)
+            if DEBUG:
+                name = os.path.basename(data_scad)
+                print(f"── {name} ──\n{scad_data}\n── Ende {name} ──", flush=True)
             shutil.copy(renderer_src, renderer)
 
             try:
@@ -1059,8 +1139,11 @@ class Handler(BaseHTTPRequestHandler):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 3 and sys.argv[1] == "--parse":
-        with open(sys.argv[2], encoding="utf-8") as f:
+    DEBUG = "--debug" in sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != "--debug"]
+
+    if len(args) >= 2 and args[0] == "--parse":
+        with open(args[1], encoding="utf-8") as f:
             text = f.read()
         try:
             print(csv_to_scad(text))
@@ -1070,5 +1153,6 @@ if __name__ == "__main__":
     else:
         addr = ("", 8080)
         httpd = HTTPServer(addr, Handler)
-        print("Hausmasken-Generator läuft auf http://localhost:8080")
+        print("Hausmasken-Generator läuft auf http://localhost:8080"
+              + (" (debug)" if DEBUG else ""))
         httpd.serve_forever()

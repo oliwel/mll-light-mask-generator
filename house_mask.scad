@@ -5,9 +5,10 @@
 include <house_data.scad>
 
 // ── Konstanten ────────────────────────────────────────────────────────────────
-licht_h = 1.1; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
+licht_h = 1.2; // Einstecktiefe Lichtausschnitt von Dachoberkante [mm]
 tunnel_w   = 15;   // Tunnel Innenbreite (X) [mm]
-tunnel_d   = 6;    // Tunnel Innentiefe  (Y) [mm]
+tunnel_d   = 9;    // Tunnel Innentiefe  (Y) [mm]
+tunnel_wall = 1.2; // Tunnel Wandstärke
 
 // ── LED-Öffnungen im Dach (portiert aus lightbox.scad) ──────────────────────────
 // Öffnungstyp (dach_cuts-Eintrag [cx, cy, led]). Bestimmt die komplette
@@ -69,6 +70,96 @@ module led_negative_by_type( led, wall ) {
 }
 
 
+// ── 6-polige IDC-Buchse (2×3, 2,54 mm Raster) ───────────────────────────────────
+// Aufnahmetasche für eine weibliche IDC-Pfostenbuchse (Flachbandkabel-Stecker,
+// FC-6P). Die Tasche öffnet nach z = 0, sitzt im rechten Tunnelabschnitt und ist
+// so gesetzt, dass die linke Kontaktspalte auf der Mittelachse des Dachausschnitts
+// liegt; dafür wird die Tunnelwand rechts um idc_ext verbreitert. Diese linke
+// Spalte wird nicht kontaktiert und bleibt daher geschlossen.
+// Der Sockel füllt den Tunnelquerschnitt vom Tunnelboden bis zur Oberkante der
+// Grundplatte.
+//   Lokales System: Ursprung = Tunnelmitte in X/Y, z = 0 am Tunnelboden.
+//
+// Anschlussart (licht-Eintrag l[4]):
+IDC_NONE  = 0; // kein Anschluss im Tunnel
+IDC_PLUG  = 1; // Buchse mit Steckertasche für das Flachbandkabel
+IDC_STACK = 2; // nur die Grundplatte als Führung für die Platinenverbinder;
+               // ohne Steckertasche, damit gestapelte Räume aufeinander passen
+idc_pitch = 2.54; // Rastermaß IDC [mm]
+idc_cols  = 3;    // Kontakte in X
+idc_rows  = 2;    // Kontakte in Y
+idc_in_w  = 12;   // Innenmaß der Tasche in X [mm]
+idc_in_d  = 7;    // Innenmaß der Tasche in Y [mm]
+idc_gap   = 6;    // Oberkante der Grundplatte über dem Tunnelboden [mm]
+idc_base  = 1;  // Dicke der Grundplatte mit den Kontaktlöchern [mm]
+idc_hole  = 1.4;  // Öffnung je Kontaktkammer [mm]
+
+// Taschenmitte rechts der Mittelachse: die Kontakte sind in der Tasche zentriert,
+// die linke Kontaktreihe liegt auf x = 0.
+idc_off_x = (idc_cols - 1)/2 * idc_pitch;
+// Verbreiterung der rechten Tunnelwand, damit die Tasche eine volle Wandstärke
+// behält. Gilt über die gesamte Tunnelhöhe, sonst entstünde eine Auskragung.
+idc_ext   = max(0, idc_off_x + idc_in_w/2 + tunnel_wall - (tunnel_w/2 + tunnel_wall));
+
+// Oberkante der Grundplatte: die Buchse braucht darunter die Steckertasche, die
+// Führung besteht nur aus der Grundplatte selbst.
+function idc_base_z(mode) = mode == IDC_STACK ? idc_base : idc_gap;
+// Verbreiterung nur für die Steckertasche; die Führung bleibt im Tunnelquerschnitt,
+// damit gestapelte Räume dieselbe Außenkontur behalten.
+function idc_mode_ext(mode) = mode == IDC_STACK ? 0 : idc_ext;
+
+// Positivteil: Sockel bis zur Grundplatten-Oberkante plus Fase darüber.
+module idc_socket_body(mode, wall = tunnel_wall) {
+    eps    = 0.01;             // Überlappung der beiden Fasenhälften
+    base_z = idc_base_z(mode); // Oberkante der Grundplatte
+    ramp   = tunnel_d/2;       // 45°-Fase von der Tunnelwand bis zur Mitte
+    body_w = tunnel_w + 2*wall + idc_mode_ext(mode);
+
+    translate([-(tunnel_w/2 + wall), 0, 0]) {
+        // Sockel über den gesamten Tunnelquerschnitt
+        translate([0, -(tunnel_d/2 + wall), 0])
+            cube([body_w, tunnel_d + 2*wall, base_z]);
+
+        // Fase als Stützstruktur über der Grundplatte, aufgespannt zwischen den
+        // Tunnel-Längswänden bei y = ±ramp. Beim Druck liegt die Dachfläche
+        // unten, +z zeigt also nach unten: die Grundplatte wäre sonst eine frei
+        // hängende Fläche. Beide Hälften setzen an den Wänden an und wachsen
+        // unter 45° bis zur Mitte zusammen, sodass jede Schicht nur um eine
+        // Schichthöhe auskragt. Die Fase läuft über die gesamte Tunnelbreite.
+        for (s = [-1, 1])
+            rotate([90, 0, 90])
+                linear_extrude(height = body_w)
+                    polygon([[-s * eps,  base_z],
+                             [s * ramp,  base_z],
+                             [s * ramp,  base_z + ramp]]);
+    }
+}
+
+// Negativteil: Steckertasche, Kodiernase und Kontaktkammern. Die Führung
+// (IDC_STACK) hat keine Tasche, die Grundplatte liegt dort direkt am Tunnelboden.
+module idc_socket_cavity(tunnel_h, mode, wall = tunnel_wall) {
+    pocket_z = idc_base_z(mode) - idc_base;   // Taschendecke = Unterseite Grundplatte
+
+    if (mode != IDC_STACK) {
+        // Steckertasche, nach z = 0 offen
+        translate([idc_off_x, 0, pocket_z/2 - 0.05])
+            cube([idc_in_w, idc_in_d, pocket_z + 0.1], true);
+
+        // Kodiernase des Steckers in der Vorderwand
+        translate([idc_off_x, -idc_in_d/2 - wall/2, pocket_z/2 - 0.05])
+            cube([idc_pitch, wall + 0.1, pocket_z + 0.1], true);
+    }
+
+    // Kontaktkammern durch Grundplatte und Fase bis über die Tunneloberkante,
+    // damit die Kontakte frei liegen. Die linke Spalte auf der Mittelachse wird
+    // nicht kontaktiert und entfällt in beiden Betriebsarten.
+    for (ix = [1 : idc_cols - 1], iy = [0 : idc_rows - 1])
+        translate([ix * idc_pitch,
+                   (iy - (idc_rows - 1)/2) * idc_pitch,
+                   (pocket_z + tunnel_h)/2])
+            cube([idc_hole, idc_hole, tunnel_h - pocket_z + 0.2], true);
+}
+
 // ── Print-Offset ──────────────────────────────────────────────────────────────
 // print_offset = [vorne, rechts, hinten, links]
 po_fr = print_offset[0];   // Vorderwand-Versatz
@@ -83,7 +174,7 @@ wall_left_inner  = po_le + aussenwand;
 wall_right_inner = room_width  - po_ri - aussenwand;
 
 // ── Lichtöffnung ──────────────────────────────────────────────────────────────
-// licht = [[cx, cy, rotation, slot_mode], ...]
+// licht = [[cx, cy, rotation, slot_mode, idc], ...]
 // cx/cy = Mittelpunkt des Ausschnitts, absolute SCAD-Koordinaten vom Körperursprung (0,0).
 // Ohne Datenwerte im licht-Abschnitt → automatisch zentriert (server.py).
 
@@ -137,42 +228,103 @@ module tunnel(l) {
     ly  = cy - licht_d / 2;
     tw  = tunnel_w / 2;
     td  = tunnel_d / 2;
+    tw_g = tunnel_w + 2* tunnel_wall;
+    td_g = tunnel_d + 2* tunnel_wall;
     // 1mm Abstand für Platinenauflage
     h   = room_height - licht_h;
+    // Anschlussart aus der Datenzeile: "idc" → IDC_PLUG, "stack" → IDC_STACK
+    idc = is_undef(l[4]) ? IDC_NONE : l[4];
+    ext = idc_mode_ext(idc);   // Verbreiterung der rechten Wand für die Buchse
 
     difference() {
         union() {
-            // Standfuss - solider Würfel bildet Pfeiler + X-Wände
-            translate([cx - 12.5, cy - td - innenwand, 0])
-                cube([25, tunnel_d + 2*innenwand, h]);
+            difference() {
+                union() {
+                    // Standfuss - solider Würfel bildet Pfeiler + X-Wände
+                    translate([cx - tw_g/2, cy - td_g/2, 0])
+                        cube([tw_g + ext, td_g, h]);
 
-            // Kreuzwand in Y-Richtung
-            translate([lx - innenwand , cy - innenwand/2, 0])
-                cube([ licht_w + 2 * innenwand, innenwand, h]);
+                    // Kreuzwand in Y-Richtung
+                    translate([lx - innenwand , cy - innenwand/2, 0])
+                        cube([ licht_w + 2 * innenwand, innenwand, h]);
 
-            // Kreuzwand in X-Richtung
-            translate([cx - innenwand/2, ly - innenwand, 0])
-                cube([innenwand, licht_d + 2* innenwand, h]);
+                    // Kreuzwand in X-Richtung
+                    translate([cx - innenwand/2, ly - innenwand, 0])
+                        cube([innenwand, licht_d + 2* innenwand, h]);
 
-            // Ausrichtungshilfe
-            translate([lx + licht_w, ly + 21.4, h])
-                cylinder( h = licht_h, d = 6.8, $fn=32 );
+                    // Ausrichtungshilfe
+                    translate([lx + licht_w, ly + 21.4, h])
+                        cylinder( h = licht_h, d = 6.8, $fn=32 );
 
-            // Halterung Schalter (Ausschnitt erfolgt später)
-            translate([cx - 3, ly - 4, room_height - 3 ])
-                cube([ 6, 4, 3.0]);
+                    // Halterung Schalter (Ausschnitt erfolgt später)
+                    translate([cx - 3, ly - 4, room_height - 3 ])
+                        cube([ 6, 4, 3.0]);
 
+                }
+
+                translate([cx - tw, cy - td, -0.1])
+                    cube([tunnel_w, tunnel_d, h + 0.2]);
+
+            }
+
+            // Sockel der IDC-Buchse füllt die Tunnelbohrung von unten auf
+            if (idc != IDC_NONE)
+                translate([cx, cy, 0])
+                    idc_socket_body(idc);
         }
 
-        translate([cx - tw, cy - td, -0.1])
-            cube([15, 6, h + 0.2]);
-
-        // Durchgangslöcher Ø2.5mm von oben durch Würfel und Seitenwände
-        translate([cx - tw - 2.5, cy, -1])
-            cylinder(h=room_height + 2, d=2.5, $fn=32);
-        translate([cx + tw + 2.5, cy, -1])
-            cylinder(h=room_height + 2, d=2.5, $fn=32);
+        // Tasche der IDC-Buchse; greift bis in die verbreiterte rechte Wand
+        if (idc != IDC_NONE)
+            translate([cx, cy, 0])
+                idc_socket_cavity(h, idc);
     }
+}
+
+// ── Stapelecken ───────────────────────────────────────────────────────────────
+// Bei gesetztem Stockwerk bekommt jede der vier Dachecken eine quadratische
+// Aussparung; ab dem ersten Obergeschoss sitzt an den unteren Ecken ein
+// passender Zapfen. Gestapelt greift der Zapfen des oberen Raums in die
+// Aussparung des darunterliegenden Dachs und fixiert die Räume zueinander.
+ecke_kante = 2;     // Kantenlänge der Aussparung [mm]
+ecke_spiel = 0.15;  // Spiel je Seite zwischen Zapfen und Aussparung [mm]
+
+geschoss_nr = is_undef(geschoss) ? -1 : geschoss;
+
+// Eine Außenwand ohne Öffnungen wird nicht erzeugt. Fehlen an einer Ecke beide
+// angrenzenden Wände, hätte ein Zapfen dort keine Anbindung an den Körper.
+function ecke_hat_wand(sx, sy) =
+    len(sy ? back_windows : front_windows) > 0 ||
+    len(sx ? right_windows : left_windows) > 0;
+
+// Setzt die Kinder in die vier Ecken der Dachfläche (Druckversatz berücksichtigt).
+// Lokaler Ursprung = äußere Ecke, +X/+Y zeigen nach innen; die Spiegelung macht
+// die Kinder für alle vier Ecken identisch.
+//   nur_mit_wand = Ecken ohne angrenzende Außenwand auslassen
+module ecken_place(nur_mit_wand = false) {
+    for (sx = [0, 1], sy = [0, 1])
+        if (!nur_mit_wand || ecke_hat_wand(sx, sy))
+            translate([sx ? room_width - po_ri : po_le,
+                       sy ? room_depth - po_ba : po_fr,
+                       0])
+                scale([sx ? -1 : 1, sy ? -1 : 1, 1])
+                    children();
+}
+
+// Aussparung: vom Dachaußenrand ecke_kante tief nach innen.
+module ecken_cut() {
+    ecken_place()
+        translate([0, 0, room_height - ecke_kante])
+            cube([ecke_kante, ecke_kante, ecke_kante + 0.1]);
+}
+
+// Zapfen: an den beiden Außenflächen bündig mit der Wand, nach innen um
+// ecke_spiel schlanker als die Aussparung. Er ragt um ecke_kante unter die
+// Raumunterkante und läuft ebenso weit nach oben in den Körper hinein, damit er
+// an der Ecke fest angebunden ist.
+module ecken_pin() {
+    ecken_place(nur_mit_wand = true)
+        translate([0, 0, -ecke_kante])
+            cube([ecke_kante - ecke_spiel, ecke_kante - ecke_spiel, 2*ecke_kante]);
 }
 
 // ── Randrahmen um Dachausschnitt ──────────────────────────────────────────────
@@ -372,16 +524,24 @@ union() {
     for (l = licht)
         licht_transform(l)
             color([0.8, 0.8, 0]) licht_border(l);
+
+    // Zapfen der Stapelecken ab dem ersten Obergeschoss
+    if (geschoss_nr > 0)
+        color([0.8, 0.8, 0]) ecken_pin();
 } // union
+
+// Aussparungen der Stapelecken, sobald ein Stockwerk angegeben ist
+if (geschoss_nr >= 0)
+    ecken_cut();
 
 // Kabelschlitz global schneiden
 for (l = licht)
     licht_transform(l) mode_switch(l);
 
 for (t = texts)
-    translate([t[1], t[2], room_height - 0.4])
+    translate([t[1], t[2], room_height - dachwand + 0.4])
         rotate([0, 0, t[3]])
-            linear_extrude(height = 0.5)
+            linear_extrude(height = dachwand)
                 text(t[0], size = 5);
 
 } // difference
