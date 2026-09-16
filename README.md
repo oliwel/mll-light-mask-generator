@@ -204,7 +204,9 @@ in der Zeile stehen:
 - **Eine Zahl** → automatische Trennwand: Die Zahl ist die **Position** entlang der
   Wand. Die Trennwand wächst von der Außenwand nach innen bis zum Dachausschnitt
   der Platine. Die Lücke zwischen der Wand und der Stützwand der Platine wird
-  entlang der Dachkante automatisch geschlossen.
+  entlang der Dachkante automatisch geschlossen. Sind mehrere Platinen definiert,
+  läuft die Wand zu der Platine, deren Mitte ihrem Ansatzpunkt an der Außenwand
+  am nächsten liegt.
 - **Zwei Zahlen** (`Position, Länge`) → Trennwand mit **fester Länge**, es
   findet keine automatische Verbindung mit der Stützstruktur statt.
 

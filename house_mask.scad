@@ -178,11 +178,16 @@ wall_right_inner = room_width  - po_ri - aussenwand;
 // cx/cy = Mittelpunkt des Ausschnitts, absolute SCAD-Koordinaten vom Körperursprung (0,0).
 // Ohne Datenwerte im licht-Abschnitt → automatisch zentriert (server.py).
 
-// Referenz-Eintrag für Innenwand-Logik (erster Eintrag)
-licht_cx = len(licht) > 0 ? licht[0][0] : 0;
-licht_cy = len(licht) > 0 ? licht[0][1] : 0;
-licht_x  = licht_cx - licht_w / 2;
-licht_y  = licht_cy - licht_d / 2;
+// Referenz-Eintrag für die Innenwand-Logik: eine Auto-Innenwand läuft zu dem
+// Ausschnitt, dessen Mitte dem Ansatzpunkt der Wand an der Außenwand am
+// nächsten liegt. Bei nur einer Platine ist das immer diese eine.
+function licht_dist2(i, px, py) = pow(licht[i][0] - px, 2) + pow(licht[i][1] - py, 2);
+function licht_nearest(px, py, i = 1, best = 0) =
+    i >= len(licht) ? best
+  : licht_nearest(px, py, i + 1,
+                  licht_dist2(i, px, py) < licht_dist2(best, px, py) ? i : best);
+// Mittelpunkt des zuständigen Ausschnitts; ohne licht-Eintrag der Ursprung.
+function licht_ref(px, py) = len(licht) > 0 ? licht[licht_nearest(px, py)] : [0, 0];
 
 module licht_transform(l) {
     cx = l[0];
@@ -219,7 +224,7 @@ module wall_with_windows(length, inset_l, inset_r, windows) {
 
 // ── Tunnel-Struktur ───────────────────────────────────────────────────────────
 // Zentriert im Dachausschnitt; Innenmasse tunnel_w × tunnel_d.
-// Aufbau: Vorder-/Hinterwand (15mm in X), center_fins (bei licht_cx in Y),
+// Aufbau: Vorder-/Hinterwand (15mm in X), center_fins (bei cx in Y),
 // Würfel 5×5×5mm außen links und rechts (ab Innenmass).
 
 module tunnel(l) {
@@ -439,23 +444,37 @@ module inner_wall(p, len, v_edge, u_c) {
 // Platziert alle Innenwände einer Seite. face: 0=vorne,1=hinten,2=links,3=rechts.
 // vorne/rechts sind Rotationen, hinten/links Spiegelungen – die Position p wird
 // serverseitig bereits passend (invertiert) geliefert.
+// Der Ansatzpunkt einer Wand liegt auf der Innenfläche ihrer Außenwand bei der
+// Position w[0]; er bestimmt, welcher Ausschnitt angefahren wird.
 module inner_walls_place(face, walls) {
     if (face == 0)          // vorne: keine Drehung, nach innen = +Y
         translate([0, wall_front_inner, 0])
-            for (w = walls)
-                inner_wall(w[0], w[1], licht_y - wall_front_inner, licht_cx);
+            for (w = walls) {
+                ref = licht_ref(w[0], wall_front_inner);
+                inner_wall(w[0], w[1],
+                           ref[1] - licht_d/2 - wall_front_inner, ref[0]);
+            }
     else if (face == 1)     // hinten: an Y gespiegelt
         translate([0, wall_back_inner, 0]) mirror([0, 1, 0])
-            for (w = walls)
-                inner_wall(w[0], w[1], wall_back_inner - (licht_y + licht_d), licht_cx);
+            for (w = walls) {
+                ref = licht_ref(w[0], wall_back_inner);
+                inner_wall(w[0], w[1],
+                           wall_back_inner - (ref[1] + licht_d/2), ref[0]);
+            }
     else if (face == 2)     // links: X↔Y getauscht (Spiegelung)
         translate([wall_left_inner, 0, 0]) mirror([1, 0, 0]) rotate([0, 0, 90])
-            for (w = walls)
-                inner_wall(w[0], w[1], licht_x - wall_left_inner, licht_cy);
+            for (w = walls) {
+                ref = licht_ref(wall_left_inner, w[0]);
+                inner_wall(w[0], w[1],
+                           ref[0] - licht_w/2 - wall_left_inner, ref[1]);
+            }
     else if (face == 3)     // rechts: 90°-Drehung
         translate([wall_right_inner, 0, 0]) rotate([0, 0, 90])
-            for (w = walls)
-                inner_wall(w[0], w[1], wall_right_inner - (licht_x + licht_w), licht_cy);
+            for (w = walls) {
+                ref = licht_ref(wall_right_inner, w[0]);
+                inner_wall(w[0], w[1],
+                           wall_right_inner - (ref[0] + licht_w/2), ref[1]);
+            }
 }
 
 // ── Hauptgeometrie ────────────────────────────────────────────────────────────
