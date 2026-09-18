@@ -101,8 +101,14 @@ Je nach Anzahl der Werte:
 | Werte | Bedeutung |
 |-------|-----------|
 | `2.5` | gleicher Offset auf **allen vier Seiten** |
-| `2.5,1` | erste Zahl = **vorne & hinten**, zweite = **links & rechts** |
+| `2.5,1` | wie die Maßzeile: erste Zahl = **Breite** (links & rechts), zweite = **Tiefe** (vorne & hinten) |
 | `2,1,2,1` | je Seite einzeln: **vorne, rechts, hinten, links** |
+
+> [!CAUTION] Die Reihenfolge unterscheidet sich zwischen den beiden Formen. Mit
+> **zwei** Werten zählt die Zeile **Achsen** wie die Maßzeile: `Breite, Tiefe`.
+> Mit **vier** Werten zählt sie **Seiten** reihum ab vorne:
+> `vorne, rechts, hinten, links`. Die vier Seiten einzeln zu setzen heißt also
+> nicht, einfach zwei Werte anzuhängen – `2,1` entspricht `1,2,1,2`.
 
 ```
 raum

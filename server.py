@@ -6,7 +6,8 @@ CSV-Format:
   # Kommentar (wird verworfen)
   raum
   breite,tiefe,hoehe              (genau 3 Werte)
-  offset                          (optional: 1/2/4 Werte → alle/x+y/vorne,rechts,hinten,links)
+  offset                          (optional: 1/2/4 Werte → alle / x,y (wie breite,tiefe) /
+                                   vorne,rechts,hinten,links)
   druck
   wand,0.8                        (Wandstärke; weitere Druckparameter als schluessel,wert)
   wand
@@ -715,7 +716,9 @@ def _normalize_offset(offset_row: list | None) -> list:
     if len(v) == 1:
         return [v[0], v[0], v[0], v[0]]
     if len(v) == 2:
-        return [v[0], v[1], v[0], v[1]]
+        # Sonderfall: die Zweiwert-Form ist achsenweise als x,y zu lesen – wie die
+        # Maßzeile breite,tiefe. x verkleinert links/rechts, y vorne/hinten.
+        return [v[1], v[0], v[1], v[0]]
     return list(v)  # already 4
 
 
