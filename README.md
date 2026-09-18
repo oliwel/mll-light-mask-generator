@@ -116,6 +116,35 @@ raum
 2.5
 ```
 
+### Dritte Zeile – Stockwerk (`G<n>`), optional
+
+Werden mehrere Räume übereinander gestapelt, bekommt der `raum`-Abschnitt eine
+eigene Zeile `G<n>` mit der Stockwerksnummer (`G0` = Erdgeschoss, einstellig).
+Sie gilt für den ganzen Raum und setzt automatisch:
+
+- jedes **ungerade** Stockwerk dreht alle Platinen um 180°, damit die Anschlüsse
+  abwechselnd liegen,
+- die Ziffer wird in die **vordere rechte Ecke** des Dachs graviert, sodass am
+  gedruckten Teil ablesbar ist, zu welchem Stockwerk es gehört,
+- an den vier **Innenecken der Außenwände** kommt je eine Aussparung im Dach;
+  ab `G1` sitzt an denselben Ecken unten ein passender Zapfen. Aufeinandergesetzt
+  rasten die Räume darüber ineinander ein. An einer Ecke, an der beide
+  angrenzenden Außenwände fehlen (Wand ohne Öffnungen), entfällt der Zapfen.
+
+Die Ecken liegen **innen an den Wänden**, die Außenkontur der Maske bleibt also
+unberührt und beim Einschieben ins Haus setzt nichts auf. Drei Ecken sind
+Quadrate mit 2 mm Kantenlänge, die Ecke **vorne links** ist ein Viertelkreis mit
+3 mm Radius – damit passen gestapelte Räume nur in einer Drehlage zusammen.
+
+Die Offset-Zeile darf fehlen, `G<n>` steht dann direkt unter den Außenmaßen.
+
+```
+raum
+110,78,35
+2.5
+G1
+```
+
 ---
 
 ## Schritt 2 – Hausplatine platzieren (`licht`)
@@ -127,9 +156,9 @@ vollständig innerhalb der Maske liegen.
 **Format:** `Mitte-X, Mitte-Y [, Rotation] [, Schalter] [, Anschluss]`
 
 - `Mitte-X, Mitte-Y` = Koordinaten des **Platinenmittelpunkts** (vom Ursprung vorne links).
-- `Rotation` (optional) = Drehung in Grad: `90`, `180`, `-90` (wird über Stockwerk gesteuert).
+- `Rotation` (optional) = Drehung in Grad: `90`, `180`, `-90`. Ohne Angabe setzt die Stockwerkszeile `G<n>` des `raum`-Abschnitts die Drehung.
 - `Schalter` (optional) = Position des Schalterausschnitts: `weiter` oder `ende`.
-- `Anschluss` (optional) = Schlüsselwort: `idc` IDC-Buchse wird mitgedruckt, `stack` (optional) druckt die Führung für die Platinenverbinder, beides wird im Normalfall über Stockwerk gesteuert.
+- `Anschluss` (optional) = Schlüsselwort: `idc` druckt die IDC-Buchse mit, `stack` nur die Führung für die Platinenverbinder. Ohne Schlüsselwort bleibt der Tunnel offen.
 
 Werden beide Schlüsselwörter angegeben, steht `Schalter` **vor** `Anschluss`:
 `41,40,ende,idc` ist gültig, `41,40,idc,ende` nicht.
@@ -144,30 +173,6 @@ Weitere Möglichkeiten:
 - **Automatisch zentrieren:** Abschnitt `licht` ohne Werte (oder eine einzelne `0`)
   schreiben – die Platine wird mittig im Raum platziert.
 - **Keine Platine:** den `licht`-Abschnitt komplett weglassen.
-
-### Gestapelte Räume (`G<n>`)
-
-Werden mehrere Räume übereinander gestapelt, bekommt der `licht`-Abschnitt eine
-eigene Zeile `G<n>` mit der Stockwerksnummer (`G0` = Erdgeschoss, einstellig).
-Sie gilt für alle Platinen des Abschnitts und setzt automatisch:
-
-- jedes **ungerade** Stockwerk wird um 180° gedreht, damit die Anschlüsse
-  abwechselnd liegen,
-- ab `G1` nur die Grundplatte am unteren Tunnelende (ohne Steckertasche), damit
-  die Räume aufeinander passen,
-- die Ziffer wird in die **vordere rechte Ecke** des Dachs graviert, sodass am
-  gedruckten Teil ablesbar ist, zu welchem Stockwerk es gehört,
-- in die vier **Dachecken** kommt je eine quadratische Aussparung von 2 mm
-  Kantenlänge; ab `G1` sitzt an den unteren Ecken ein passender Zapfen, der
-  außen bündig mit der Wand abschließt. Aufeinandergesetzt rasten die Räume
-  darüber ineinander ein. An einer Ecke, an der beide angrenzenden Außenwände
-  fehlen (Wand ohne Öffnungen), entfällt der Zapfen.
-
-```
-licht
-G1
-41,40,ende
-```
 
 > [!INFO] Unter der Platine wird immer der Tunnel für den Anschluß und vier
 > Wandstücke bis an den Dachausschnitt eingefügt.
@@ -235,13 +240,31 @@ zu Punkt.
 
 **Format:** `x1, y1, x2, y2 [, x3, y3, …]` (mindestens 2 Punkte, nach oben offen)
 
-Die Punkte dürfen auch über mehrere Zeilen verteilt werden – jede weitere Zeile
-setzt denselben Linienzug fort. Ein neuer `wand`-Abschnitt beginnt einen neuen Zug.
+Ein `wand`-Abschnitt nimmt beliebig viele solcher Zeilen auf; jede ist eine
+**eigenständige** Wand.
 
 ```
 wand
-41,0,41,25,66,25,66,0
+41,0,41,25,66,25,66,0    # ein Linienzug über drei Segmente
+27,0,27,22               # davon unabhängige zweite Wand
 ```
+
+**Linienzug über mehrere Zeilen:** Trägt eine Zeile nur **ein** Koordinatenpaar,
+verlängert sie die zuletzt begonnene Wand um diesen Punkt – unabhängig davon, wie
+viele Punkte deren vorige Zeile hatte. Eine Zeile mit **zwei oder mehr** Paaren
+beginnt dagegen immer eine neue Wand.
+
+```
+wand
+10,10               # ┐
+20,20               # ├ eine Wand über zwei Segmente
+30,30               # ┘
+40,40,50,50         # neue Wand …
+60,20               # … um einen Punkt verlängert
+```
+
+> [!CAUTION] Ein einzelnes Koordinatenpaar, das nichts fortsetzt und selbst nicht
+> fortgesetzt wird, ergibt kein Segment und wird als Fehler gemeldet.
 
 Auch hier messen negative Koordinaten von der rechten bzw. hinteren Raumkante.
 Die Wände können anhand der Außenmaße gesetzt werden, der Generator beschneidet
@@ -291,7 +314,7 @@ Beschriftet die Oberseite der Maske, z. B. mit dem Hausnamen (max. 50 Zeichen).
 
 | Zeile | Bedeutung |
 |-------|-----------|
-| `Musterhaus` | Text, automatisch platziert |
+| `Musterhaus` | Text, automatisch platziert: 3 mm/3 mm von der vorderen linken Ecke des **Druckkörpers**, wandert also mit dem Offset |
 | `20,30,Musterhaus` | Text an Position `X,Y` |
 | `20,30,90,Musterhaus` | Text an Position `X,Y` mit Drehung in Grad |
 

@@ -286,11 +286,15 @@ module tunnel(l) {
 }
 
 // ── Stapelecken ───────────────────────────────────────────────────────────────
-// Bei gesetztem Stockwerk bekommt jede der vier Dachecken eine quadratische
-// Aussparung; ab dem ersten Obergeschoss sitzt an den unteren Ecken ein
-// passender Zapfen. Gestapelt greift der Zapfen des oberen Raums in die
-// Aussparung des darunterliegenden Dachs und fixiert die Räume zueinander.
-ecke_kante = 2;     // Kantenlänge der Aussparung [mm]
+// Bei gesetztem Stockwerk bekommt jede der vier Wandinnenecken eine Aussparung
+// im Dach; ab dem ersten Obergeschoss sitzt an den unteren Ecken ein passender
+// Zapfen. Gestapelt greift der Zapfen des oberen Raums in die Aussparung des
+// darunterliegenden Dachs und fixiert die Räume zueinander. Zapfen und
+// Aussparung liegen auf der Innenseite der Außenwände, damit die Außenkontur
+// der Maske unverändert bleibt und beim Einschieben nichts aufsetzt.
+ecke_kante = 2;     // Kantenlänge der quadratischen Ecken [mm]
+ecke_r     = 3;     // Radius des Viertelkreises vorne links [mm]
+ecke_tief  = 2;     // Eingriffstiefe von Zapfen und Aussparung [mm]
 ecke_spiel = 0.15;  // Spiel je Seite zwischen Zapfen und Aussparung [mm]
 
 geschoss_nr = is_undef(geschoss) ? -1 : geschoss;
@@ -301,35 +305,58 @@ function ecke_hat_wand(sx, sy) =
     len(sy ? back_windows : front_windows) > 0 ||
     len(sx ? right_windows : left_windows) > 0;
 
-// Setzt die Kinder in die vier Ecken der Dachfläche (Druckversatz berücksichtigt).
-// Lokaler Ursprung = äußere Ecke, +X/+Y zeigen nach innen; die Spiegelung macht
-// die Kinder für alle vier Ecken identisch.
-//   nur_mit_wand = Ecken ohne angrenzende Außenwand auslassen
-module ecken_place(nur_mit_wand = false) {
-    for (sx = [0, 1], sy = [0, 1])
-        if (!nur_mit_wand || ecke_hat_wand(sx, sy))
-            translate([sx ? room_width - po_ri : po_le,
-                       sy ? room_depth - po_ba : po_fr,
-                       0])
-                scale([sx ? -1 : 1, sy ? -1 : 1, 1])
-                    children();
+// Innere Ecken der Außenwände (Druckversatz und Wandstärke berücksichtigt).
+function ecke_pos(sx, sy) = [sx ? wall_right_inner : wall_left_inner,
+                             sy ? wall_back_inner  : wall_front_inner];
+
+// Grundriss einer Stapelecke. Lokaler Ursprung = innere Wandecke, +X/+Y zeigen
+// nach innen; die Spiegelung im Aufrufer dreht den Grundriss in die jeweilige
+// Ecke. Vorne links ein Viertelkreis, sonst ein Quadrat – die abweichende Form
+// macht die Stapellage eindeutig, gestapelt passt nur eine Drehung.
+//   spiel = Untermaß je Seite (Zapfen); die beiden Kanten an den Wänden bleiben
+//           bündig, das Spiel liegt auf der Innenseite.
+module ecke_profil(sx, sy, spiel = 0) {
+    if (!sx && !sy)
+        intersection() {
+            circle(r = ecke_r - spiel, $fn = 64);
+            square(ecke_r);
+        }
+    else
+        square(ecke_kante - spiel);
 }
 
-// Aussparung: vom Dachaußenrand ecke_kante tief nach innen.
+// Aussparung: von der Dachunterseite ecke_tief nach oben durch das Dach.
 module ecken_cut() {
-    ecken_place()
-        translate([0, 0, room_height - ecke_kante])
-            cube([ecke_kante, ecke_kante, ecke_kante + 0.1]);
+    for (sx = [0, 1], sy = [0, 1]) {
+        p = ecke_pos(sx, sy);
+        translate([p[0], p[1], room_height - ecke_tief])
+            scale([sx ? -1 : 1, sy ? -1 : 1, 1])
+                linear_extrude(height = ecke_tief + 0.1)
+                    ecke_profil(sx, sy);
+    }
 }
 
-// Zapfen: an den beiden Außenflächen bündig mit der Wand, nach innen um
-// ecke_spiel schlanker als die Aussparung. Er ragt um ecke_kante unter die
-// Raumunterkante und läuft ebenso weit nach oben in den Körper hinein, damit er
-// an der Ecke fest angebunden ist.
+// Zapfen: an den beiden Wandinnenflächen, nach innen um ecke_spiel schlanker
+// als die Aussparung. Er ragt um ecke_tief unter die Raumunterkante und läuft
+// ebenso weit nach oben in den Körper.
+// An der Wandinnenfläche liegt der Zapfen nur an, ohne Überlappung wäre er ein
+// eigener Körper. Der Fuß ist deshalb derselbe Grundriss, um die Wandstärke
+// nach außen versetzt: er endet genau an den Wandaußenflächen und verschmilzt
+// auf diesem Weg mit beiden Wänden.
 module ecken_pin() {
-    ecken_place(nur_mit_wand = true)
-        translate([0, 0, -ecke_kante])
-            cube([ecke_kante - ecke_spiel, ecke_kante - ecke_spiel, 2*ecke_kante]);
+    for (sx = [0, 1], sy = [0, 1])
+        if (ecke_hat_wand(sx, sy)) {
+            p = ecke_pos(sx, sy);
+            translate([p[0], p[1], 0])
+                scale([sx ? -1 : 1, sy ? -1 : 1, 1]) {
+                    translate([0, 0, -ecke_tief])
+                        linear_extrude(height = 2*ecke_tief)
+                            ecke_profil(sx, sy, ecke_spiel);
+                    translate([-aussenwand, -aussenwand, 0])
+                        linear_extrude(height = ecke_tief)
+                            ecke_profil(sx, sy);
+                }
+        }
 }
 
 // ── Randrahmen um Dachausschnitt ──────────────────────────────────────────────

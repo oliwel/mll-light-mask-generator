@@ -8,11 +8,20 @@ CSV-Format:
   breite,tiefe,hoehe              (genau 3 Werte)
   offset                          (optional: 1/2/4 Werte → alle / x,y (wie breite,tiefe) /
                                    vorne,rechts,hinten,links)
+  G<n>                            (optionale eigene Zeile, Stockwerk 0–9 beim Stapeln;
+                                   ungerades n → alle Platinen um 180 gedreht, Ziffer wird
+                                   in die vordere rechte Ecke des Dachs graviert,
+                                   Wandinnenecken bekommen Stapelaussparungen und ab
+                                   n > 0 passende Zapfen. Die Anschlussart setzt G<n>
+                                   nicht – "idc"/"stack" gehört in die licht-Datenzeile.
+                                   Eine Rotation in der licht-Zeile hat Vorrang.)
   druck
   wand,0.8                        (Wandstärke; weitere Druckparameter als schluessel,wert)
   wand
-  x1,y1,x2,y2[,...,xn,yn]        (freie Innenwand als Eckpunktzug, beliebig viele Punktpaare)
-  x,y                            (nur ein Paar → Fortsetzung der vorigen wand-Zeile)
+  x1,y1,x2,y2[,...,xn,yn]        (freie Innenwand als Eckpunktzug, beliebig viele Punktpaare;
+                                  jede Zeile mit >=2 Paaren ist eine eigenständige Wand)
+  x,y                            (nur ein Paar → verlängert den offenen Zug um
+                                  diesen Punkt)
   x1,y1,name,x2,y2               (optionaler Name → gerade "Fensterwand")
   x1,y1,name / x2,y2             (dasselbe zweizeilig; Endpunkt in der Folgezeile)
   <name>                         (Abschnitt für die benannte Wand)
@@ -26,17 +35,12 @@ CSV-Format:
                                  (2–3 Werte, absolut vom Körperursprung 0,0; negativ = von rechts/hinten;
                                   "idc" als letztes Feld → IDC-Buchse mit Steckertasche,
                                   "stack" → nur Grundplatte am unteren Tunnelende)
-  G<n>                           (eigene Zeile, Stockwerk 0–9 beim Stapeln; gilt für alle
-                                  Lichtblöcke des Abschnitts: ungerades n → Rotation 180,
-                                  n > 0 → "stack", Ziffer wird in die vordere rechte Ecke
-                                  graviert, Dachecken bekommen Stapelaussparungen und ab
-                                  n > 0 die unteren Ecken passende Zapfen.
-                                  Angaben in der Datenzeile haben Vorrang.)
   dach
   x,y,breite,tiefe               (4 Werte: Rechteck-Ausschnitt, Ecke x,y, absolut vom Körperursprung 0,0)
   x,y,<ledtyp>                   (3 Werte: Öffnung nach LED-Typ, Mitte x,y; ledtyp ∈ {none,3mm,5mm,plcc6,plcc2,ws2812})
   text
-  Text                            (1 Wert: Text an Position 5,5)
+  Text                            (1 Wert: automatisch 3mm/3mm ab der vorderen
+                                   linken Ecke des Druckkörpers)
   x,y,Text                        (3 Werte: Text an x,y)
   x,y,rotation,Text               (4 Werte: Text an x,y mit Rotation)
 
@@ -122,10 +126,10 @@ _BOX_LED_MARGIN = 5  # mm Mindestabstand der LED-Mitte zur Flächenkante
 _DACH_LED_R     = 5.5  # mm halbe max. LED-Öffnungsgröße (WS2812 Ø11) für Randprüfung
 
 _RULES = {
-    "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]"},
-    "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]"},
+    "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]  [G<n>]"},
+    "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]  |  x,y (Fortsetzung)"},
     "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
-    "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]  |  G<n>"},
+    "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]"},
     "dach":   {"hint": "x,y,breite,tiefe  |  x,y,<ledtyp>"},
     "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
     "vorne":  {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
@@ -134,7 +138,7 @@ _RULES = {
     "rechts": {"counts": {1, 2, 4}, "hint": "x,y,breite,hoehe  |  pos  |  pos,laenge"},
 }
 
-# Stockwerks-Zeile "G<n>" im licht-Abschnitt (Vorgabe für Rotation, stack und Gravur)
+# Stockwerks-Zeile "G<n>" im raum-Abschnitt (Vorgabe für Rotation und Gravur)
 _FLOOR_RE = re.compile(r"^[gG](\d+)$")
 _FLOOR_MAX = 9  # die Gravur ist auf eine Ziffer ausgelegt
 
@@ -176,8 +180,8 @@ def _clean_row(row: list[str]) -> list[str]:
 
 
 def _floor_of(sections: dict) -> int | None:
-    """Stockwerk aus der "G<n>"-Zeile des licht-Abschnitts; None = nicht angegeben."""
-    rows = sections.get("licht_geschoss")
+    """Stockwerk aus der "G<n>"-Zeile des raum-Abschnitts; None = nicht angegeben."""
+    rows = sections.get("raum_geschoss")
     return rows[0][0] if rows else None
 
 
@@ -292,6 +296,7 @@ def validate_and_parse(text: str) -> dict:
     current: str | None = None
     row_counts: dict[str, int] = {}
     wall_names: set = set()  # benannte "wand"-Fensterwände; als Section-Keyword nutzbar
+    wand_open = False        # im laufenden "wand"-Abschnitt ist ein Zug offen
 
     for lineno, row in enumerate(csv_module.reader(io.StringIO(text)), start=1):
         row = [c.strip() for c in row]
@@ -327,8 +332,9 @@ def validate_and_parse(text: str) -> dict:
                 sections[current].append([keyword, parsed[0]])
                 row_counts[current] += 1
                 continue
-            # Stockwerks-Zeile "G<n>" im licht-Abschnitt — ebenfalls vor der Keyword-Prüfung.
-            floor_match = _FLOOR_RE.match(first) if current == "licht" else None
+            # Stockwerks-Zeile "G<n>" im raum-Abschnitt — ebenfalls vor der Keyword-Prüfung.
+            # Sie zählt nicht als Datenzeile, "raum" bleibt bei Maßen und Offset.
+            floor_match = _FLOOR_RE.match(first) if current == "raum" else None
             if floor_match and len(values_all) == 1:
                 floor = int(floor_match.group(1))
                 if floor > _FLOOR_MAX:
@@ -336,12 +342,23 @@ def validate_and_parse(text: str) -> dict:
                         f'Zeile {lineno}: Stockwerk "{first}" zu groß - '
                         f"erlaubt sind einstellige Werte (G0–G{_FLOOR_MAX})"
                     )
-                elif "licht_geschoss" in sections:
+                elif "raum_geschoss" in sections:
                     errors.append(
-                        f'Zeile {lineno}: Abschnitt "licht" erlaubt nur eine Stockwerks-Zeile'
+                        f'Zeile {lineno}: Abschnitt "raum" erlaubt nur eine Stockwerks-Zeile'
                     )
                 else:
-                    sections["licht_geschoss"] = [[floor]]
+                    sections["raum_geschoss"] = [[floor]]
+                continue
+            # Die Stockwerkszeile stand früher im licht-Abschnitt; dort hilft ein
+            # gezielter Hinweis mehr als "Unbekanntes Schlüsselwort".
+            if (_FLOOR_RE.match(first) and len(values_all) == 1
+                    and current not in ("raum", "text")
+                    and keyword not in KNOWN_SECTIONS
+                    and keyword not in wall_names):
+                errors.append(
+                    f'Zeile {lineno}: Stockwerkszeile "{first}" gehört in den '
+                    f'Abschnitt "raum"'
+                )
                 continue
             if (current == "text" and keyword not in KNOWN_SECTIONS
                     and keyword not in wall_names):
@@ -358,9 +375,7 @@ def validate_and_parse(text: str) -> dict:
                 current = keyword
                 sections.setdefault(current, [])
                 row_counts.setdefault(current, 0)
-                # Jedes "wand"-Keyword beginnt einen neuen Polygonzug.
-                if keyword == "wand":
-                    sections["wand"].append({"pts": [], "names": {}})
+                wand_open = False    # Abschnittswechsel beendet den offenen Zug
                 continue
 
         if current is None:
@@ -374,8 +389,8 @@ def validate_and_parse(text: str) -> dict:
             _SLOT_KW = {"weiter": 1, "ende": 2}
             _IDC_KW = {"idc": 1, "stack": 2}
             slot_mode = 0
-            # None = nicht angegeben; die Stockwerks-Zeile "G<n>" füllt solche Felder
-            # nach der Schleife auf, angegebene Werte bleiben unangetastet.
+            # None = nicht angegeben; nach der Schleife auf 0 (kein Anschluss)
+            # gesetzt. Die Stockwerks-Zeile "G<n>" füllt nur die Rotation auf.
             idc = None  # Buchse nur bei angehängtem Schlüsselwort "idc"/"stack"
             vals = list(values)
             if vals and vals[-1].lower() in _IDC_KW:
@@ -432,7 +447,9 @@ def validate_and_parse(text: str) -> dict:
             row_counts[current] += 1
             nums = _parse_values(num_vals) if num_vals else []
             if len(nums) == 0:
-                entry = [text_val, 5, 5, 0]
+                # Ohne Koordinaten: None → generate_scad setzt die Automatikposition
+                # relativ zum Druckkörper, hier ist der Druckversatz noch unbekannt.
+                entry = [text_val, None, None, 0]
             elif len(nums) == 2:
                 entry = [text_val, nums[0], nums[1], 0]
             else:
@@ -475,12 +492,18 @@ def validate_and_parse(text: str) -> dict:
             sections[current].append([nums[0], nums[1], nums[2], nums[3]])
             continue
 
-        # wand-Abschnitt: ein "wand"-Keyword = ein Polygonzug; jede Datenzeile
-        # hängt Koordinatenpaare an. Ein Name-Token (nicht-numerisch) benennt das
-        # Segment, das am unmittelbar davor genannten Punkt beginnt – damit wird
-        # dieses einzelne (gerade) Segment zur "Fensterwand".
+        # wand-Abschnitt: eine Zeile mit zwei oder mehr Koordinatenpaaren beginnt
+        # einen eigenständigen Polygonzug; eine Zeile mit genau einem Paar
+        # (optional gefolgt von einem Namen) setzt den offenen Zug fort, egal wie
+        # viele Punkte dessen letzte Zeile hatte. So bleiben mehrpunktige Zeilen
+        # voneinander getrennt, ein Zug lässt sich aber über Zeilen hinweg
+        # verlängern. Ein Name-Token (nicht-numerisch) benennt das Segment, das am
+        # unmittelbar davor genannten Punkt beginnt – dieses gerade Segment wird
+        # zur "Fensterwand".
         if current == "wand":
-            entry = sections["wand"][-1]
+            row_counts["wand"] += 1
+            pts = []             # Punkte dieser Zeile
+            line_names = {}      # Segmentindex innerhalb dieser Zeile → Name
             pend = None          # offener x-Wert eines noch unvollständigen Paares
             line_err = None
             for tok in values:
@@ -492,26 +515,39 @@ def validate_and_parse(text: str) -> dict:
                             xy = _parse_values([pend, tok])
                         except ValidationError as ex:
                             line_err = str(ex); break
-                        entry["pts"].append([xy[0], xy[1]])
+                        pts.append([xy[0], xy[1]])
                         pend = None
                 else:  # Name-Token
                     if pend is not None:
                         line_err = f'Name "{tok}" mitten in einem Koordinatenpaar'; break
-                    if not entry["pts"]:
-                        line_err = f'Name "{tok}" vor dem ersten Punkt'; break
+                    if not pts:
+                        line_err = f'Name "{tok}" vor dem ersten Punkt der Zeile'; break
                     nm = tok.lower()
                     if nm in KNOWN_SECTIONS or nm in wall_names:
                         line_err = f'Wandname "{tok}" ist reserviert oder bereits vergeben'; break
-                    seg = len(entry["pts"]) - 1  # Segment ab dem zuletzt genannten Punkt
-                    if seg in entry["names"]:
+                    seg = len(pts) - 1  # Segment ab dem zuletzt genannten Punkt
+                    if seg in line_names:
                         line_err = "Segment hat bereits einen Namen"; break
-                    entry["names"][seg] = nm
+                    line_names[seg] = nm
                     wall_names.add(nm)
             if line_err is None and pend is not None:
                 line_err = "ungerade Anzahl an Koordinaten (x,y-Paare erwartet)"
+            if line_err is None and not pts:
+                line_err = "kein Koordinatenpaar in der Zeile"
             if line_err:
                 errors.append(f"Zeile {lineno}: {line_err}")
-            row_counts["wand"] += 1
+                continue
+            # Ein einzelnes Paar verlängert den offenen Zug, mehrere beginnen einen neuen.
+            if wand_open and len(pts) == 1:
+                entry = sections["wand"][-1]
+            else:
+                entry = {"pts": [], "names": {}, "line": lineno}
+                sections["wand"].append(entry)
+            base = len(entry["pts"])
+            entry["pts"].extend(pts)
+            for seg, nm in line_names.items():
+                entry["names"][base + seg] = nm
+            wand_open = True
             continue
 
         # Fensterwand: Abschnitt mit einem Wandnamen als Keyword; Fenster wie vorne/hinten
@@ -578,24 +614,32 @@ def validate_and_parse(text: str) -> dict:
 
         sections[current].append(_parse_values(values))
 
-    # Benannte Segmente brauchen einen Endpunkt (Segment seg = Punkt[seg]→[seg+1]).
+    # Eine Wand braucht zwei Punkte; ein einzelnes Paar ohne Fortsetzung in der
+    # Folgezeile ergäbe kein Segment. Benannte Segmente brauchen einen Endpunkt
+    # (Segment seg = Punkt[seg]→[seg+1]).
     for e in sections.get("wand", []):
         npts = len(e["pts"])
+        if npts < 2:
+            errors.append(
+                f'Zeile {e["line"]}: einzelnes Koordinatenpaar ohne Fortsetzung '
+                f"in der Folgezeile (eine Wand braucht zwei Punkte)"
+            )
         for seg, nm in e["names"].items():
             if seg + 1 >= npts:
                 errors.append(
                     f'Fensterwand "{nm}": Segment unvollständig (kein Endpunkt)'
                 )
 
-    # Nicht angegebene licht-Felder aus dem Stockwerk auffüllen: jedes ungerade
-    # Stockwerk dreht die Platine um 180°, jedes Stockwerk über dem Erdgeschoss
-    # bekommt "stack". Angaben aus der Datenzeile haben Vorrang.
+    # Nicht angegebene Rotation aus dem Stockwerk auffüllen: jedes ungerade
+    # Stockwerk dreht die Platine um 180°. Angaben aus der Datenzeile haben
+    # Vorrang. Die Anschlussart folgt nicht aus dem Stockwerk – "idc"/"stack"
+    # stehen immer explizit in der Datenzeile.
     floor = _floor_of(sections) or 0
     for row in sections.get("licht", []):
         if row[2] is None:
             row[2] = 180 if floor % 2 else 0
         if row[4] is None:
-            row[4] = 2 if floor > 0 else 0
+            row[4] = 0
 
     if errors:
         raise ValidationError("\n".join(errors))
@@ -728,6 +772,10 @@ _LICHT_D = 36
 # Gravur der Stockwerksnummer: Rand zur Dachkante und Ziffernbreite bei size=5
 _FLOOR_LABEL_MARGIN = 2
 _FLOOR_LABEL_W = 3
+
+# Automatikposition eines text-Eintrags ohne Koordinaten: Abstand zur vorderen
+# linken Ecke des Druckkörpers, also einschließlich Druckversatz.
+_TEXT_AUTO_MARGIN = 2
 
 
 def _resolve_licht_coord(offset, outer_size):
@@ -902,7 +950,11 @@ def generate_scad(sections: dict) -> str:
                     cords.append(wins)
                     named_walls.append(cords)
             else:
-                poly_walls.append(_clip_poly_wall(seg, po_le, w - po_ri, po_fr, d - po_ba))
+                # Vollständig außerhalb liegende Segmente liefern None und
+                # entfallen, statt als leerer Eintrag in die SCAD-Liste zu gehen.
+                cords = _clip_poly_wall(seg, po_le, w - po_ri, po_fr, d - po_ba)
+                if cords:
+                    poly_walls.append(cords)
     if geo_errors2:
         raise ValidationError("\n".join(geo_errors2))
 
@@ -938,9 +990,9 @@ def generate_scad(sections: dict) -> str:
         licht_val = "[]"
     elif len(licht_rows) == 0:
         # Abschnitt ohne Datenzeilen (ggf. nur mit "G<n>") → zentrierte Platine
+        # ohne Anschluss; "idc"/"stack" braucht eine eigene Datenzeile.
         auto_rot = 180 if floor and floor % 2 else 0
-        auto_idc = 2 if floor else 1
-        licht_val = f"[[{lx_auto},{ly_auto},{auto_rot},0,{auto_idc}]]"
+        licht_val = f"[[{lx_auto},{ly_auto},{auto_rot},0,0]]"
     else:
         # Mittelpunkt des Ausschnitts; 0 = automatisch; negativ = Abstand von rechts/hinten
         entries = [
@@ -958,7 +1010,17 @@ def generate_scad(sections: dict) -> str:
     # dach-Eintrag: [x,y,breite,tiefe] (Rechteck) oder [cx,cy,led] (LED-Typ)
     dach_cuts = [list(row) for row in sections.get("dach", [])]
 
-    text_rows = list(sections.get("text", []))
+    # Ein text-Eintrag ohne Koordinaten sitzt 3x3mm von der vorderen linken Ecke
+    # des Druckkörpers, wandert also mit dem Druckversatz.
+    text_rows = [
+        [
+            t[0],
+            po_le + _TEXT_AUTO_MARGIN if t[1] is None else t[1],
+            po_fr + _TEXT_AUTO_MARGIN if t[2] is None else t[2],
+            t[3],
+        ]
+        for t in sections.get("text", [])
+    ]
     if floor is not None:
         # Stockwerksnummer in die vordere rechte Ecke der Dachfläche gravieren;
         # text() setzt an der Grundlinie links an, deshalb um eine Ziffernbreite
