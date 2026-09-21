@@ -63,6 +63,7 @@ Server:     python3 server.py [--debug]
 import csv as csv_module
 import html as h
 import io
+import json
 import logging
 import math
 import os
@@ -75,7 +76,7 @@ import threading
 import time
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -88,21 +89,30 @@ _rate_lock = threading.Lock()
 _rate_data: dict[str, list[float]] = defaultdict(list)
 RATE_WINDOW = 60   # Sekunden
 RATE_LIMIT   = 10  # POST-Anfragen pro Minute pro IP
+SAMPLE_LIMIT = 60  # Abrufe einer Vorlage pro Minute pro IP
 
 
-def _rate_ok(ip: str) -> bool:
+# Jeder Schlüssel zählt für sich: Vorlagen werden mit einem eigenen Schlüssel
+# gezählt, damit das Blättern im Vorlagenmenü nicht die Vorschau ausbremst.
+def _rate_ok(key: str, limit: int = RATE_LIMIT) -> bool:
     now = time.time()
     with _rate_lock:
-        ts = [t for t in _rate_data[ip] if now - t < RATE_WINDOW]
-        if len(ts) >= RATE_LIMIT:
+        ts = [t for t in _rate_data[key] if now - t < RATE_WINDOW]
+        if len(ts) >= limit:
             return False
         ts.append(now)
-        _rate_data[ip] = ts
+        _rate_data[key] = ts
         return True
 
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 MASK_SCAD     = os.path.join(BASE_DIR, "house_mask.scad")
 LIGHTBOX_SCAD = os.path.join(BASE_DIR, "lightbox.scad")
+
+# Vorlagen: alle CSV-Dateien unterhalb von data/, die die Weboberfläche im
+# Auswahlmenü anbietet.
+DATA_DIR         = os.path.join(BASE_DIR, "data")
+MAX_SAMPLE_BYTES = 64 * 1024  # Schutz gegen versehentlich große Dateien
+MAX_SAMPLE_PATH  = 512        # Zeichen im ?path=-Parameter
 
 KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
 DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
@@ -1065,6 +1075,58 @@ def csv_to_scad(text: str) -> str:
     return generate_scad(validate_and_parse(text))
 
 
+# ── Vorlagen aus dem data-Ordner ──────────────────────────────────────────────
+# Die Oberfläche bietet alle CSV-Dateien unterhalb von data/ als Baum an. Die
+# Liste steckt im ausgelieferten HTML, den Inhalt holt der Browser einzeln über
+# GET /sample nach.
+
+def _sample_sort_key(rel: str):
+    # Komponentenweise sortieren, Groß-/Kleinschreibung egal.
+    return [(part.casefold(), part) for part in rel.split("/")]
+
+
+def list_samples() -> list[str]:
+    """Relative Pfade aller CSV-Dateien unter data/, sortiert.
+
+    Fehlt der Ordner, ist die Liste leer – die Oberfläche blendet das Menü dann
+    aus. Versteckte Dateien und Ordner bleiben außen vor; os.walk folgt keinen
+    Verzeichnis-Symlinks.
+    """
+    out: list[str] = []
+    if not os.path.isdir(DATA_DIR):
+        return out
+    for root, dirs, files in os.walk(DATA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            if name.startswith(".") or not name.lower().endswith(".csv"):
+                continue
+            rel = os.path.relpath(os.path.join(root, name), DATA_DIR)
+            out.append(rel.replace(os.sep, "/"))
+    out.sort(key=_sample_sort_key)
+    return out
+
+
+def read_sample(rel: str) -> tuple[str | None, str | None]:
+    """Inhalt einer Vorlage lesen. Rückgabe: (inhalt, fehler).
+
+    Der angefragte Pfad muss exakt in der frisch gescannten Liste stehen. Damit
+    kann keine Eingabe aus dem Ordner herausführen – '..', absolute Pfade oder
+    kodierte Varianten sind nie Mitglied der Menge. Der Pfad wird anschließend
+    aus den Komponenten neu zusammengesetzt, nicht aus dem Client-String.
+    """
+    if not rel or rel not in set(list_samples()):
+        return None, "Unbekannte Datei."
+    full = os.path.realpath(os.path.join(DATA_DIR, *rel.split("/")))
+    # Ein Symlink auf eine Datei steht legitim in der Liste, darf aber nicht aus
+    # dem Vorlagenordner herauszeigen.
+    if not full.startswith(os.path.realpath(DATA_DIR) + os.sep) or not os.path.isfile(full):
+        return None, "Unbekannte Datei."
+    if os.path.getsize(full) > MAX_SAMPLE_BYTES:
+        return None, "Datei zu groß."
+    with open(full, encoding="utf-8", errors="replace") as f:
+        return f.read(), None
+
+
 # ── HTTP-Server ───────────────────────────────────────────────────────────────
 
 def _load_template() -> str:
@@ -1073,7 +1135,15 @@ def _load_template() -> str:
 
 
 def _render(csv_text: str = "") -> str:
-    return _load_template().replace("{{csv}}", csv_text)
+    # Erst die Vorlagenliste, dann den Definitionstext: csv_text stammt im
+    # Fehlerfall aus der Eingabe des Nutzers und darf keinen Platzhalter mehr
+    # auslösen. Die spitzen Klammern werden escaped, damit ein Dateiname das
+    # umgebende script-Element nicht beenden kann.
+    samples = (json.dumps(list_samples(), ensure_ascii=False)
+               .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    return (_load_template()
+            .replace("{{samples}}", samples)
+            .replace("{{csv}}", csv_text))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1095,7 +1165,29 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/sample":
+            self._send_sample(parsed.query)
+            return
+        # Jeder andere Pfad liefert die Seite.
         self._send(200, "text/html; charset=utf-8", _render())
+
+    def _send_sample(self, query: str):
+        ip = self.client_address[0]
+        if not _rate_ok(f"{ip}|sample", SAMPLE_LIMIT):
+            self._send(429, "text/plain; charset=utf-8", "Zu viele Anfragen – bitte warten.")
+            return
+        rel = parse_qs(query).get("path", [""])[0]
+        if len(rel) > MAX_SAMPLE_PATH:
+            self._send(413, "text/plain; charset=utf-8", "Anfrage zu groß.")
+            return
+        content, error = read_sample(rel)
+        if error:
+            # Der angefragte Pfad steht bewusst nicht in der Antwort.
+            logger.warning("Vorlage abgelehnt: %s", error)
+            self._send(422, "text/plain; charset=utf-8", error)
+        else:
+            self._send(200, "text/plain; charset=utf-8", content)
 
     def _read_csv(self) -> str | None:
         length = int(self.headers.get("Content-Length", 0))

@@ -55,6 +55,40 @@
   label { font-weight: bold; font-size: 0.95rem; }
   .label-row { display: flex; align-items: baseline; gap: 0.75rem; }
   .label-row a { font-size: 0.8rem; font-weight: normal; color: #555; cursor: pointer; }
+  /* Vorlagenmenü: aufklappbarer Baum der Dateien aus dem data-Ordner */
+  .tree-menu { position: relative; display: inline-block; }
+  .tree-panel {
+    position: absolute;
+    top: 1.5rem;
+    left: 0;
+    z-index: 10;
+    min-width: 220px;
+    max-width: 420px;
+    max-height: 320px;
+    overflow: auto;
+    padding: 0.25rem 0;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    font-size: 0.82rem;
+    font-weight: normal;
+  }
+  .tree-panel[hidden] { display: none; }
+  .tree-panel ul { list-style: none; }
+  .tree-panel ul ul { margin-left: 0.85rem; }
+  .tree-panel .node {
+    display: block;
+    padding: 0.22rem 0.6rem 0.22rem 0.3rem;
+    color: #333;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tree-panel .node:hover { background: #eef3fb; }
+  .tree-panel .dir > .node::before { content: '\25B8'; display: inline-block; width: 1em; color: #888; }
+  .tree-panel .dir.open > .node::before { content: '\25BE'; }
+  .tree-panel .file > .node::before { content: '\00B7'; display: inline-block; width: 1em; color: #bbb; }
+  .tree-panel .dir:not(.open) > ul { display: none; }
   textarea {
     flex: 1;
     min-height: 120px;
@@ -193,8 +227,11 @@
   <div class="left">
     <div class="label-row">
       <label for="csv">Definition:</label>
-      <a onclick="loadSample('mask')">Beispiel<b>maske</b> laden</a>
-      <a onclick="loadSample('box')">Beispiel<b>box</b> laden</a>
+      <div class="tree-menu" id="tree-menu">
+        <a id="tree-toggle" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false"
+           onclick="toggleSampleMenu()" onkeydown="treeToggleKey(event)">Vorlage laden &#9662;</a>
+        <div class="tree-panel" id="tree-panel" hidden></div>
+      </div>
     </div>
     <textarea id="csv" placeholder="raum&#10;100,80,30&#10;vorne&#10;15,10,8,8&#10;…">{{csv}}</textarea>
     <div id="error-box"></div>
@@ -522,6 +559,9 @@ function updateMeasureLabel() {
 }
 </script>
 
+<!-- Liste der Vorlagen aus dem data-Ordner, vom Server eingesetzt. -->
+<script type="application/json" id="sample-index">{{samples}}</script>
+
 <script>
 function setLoading(on) {
   const btn     = document.getElementById('btn-preview');
@@ -535,50 +575,111 @@ function setLoading(on) {
   if (on) text.textContent = 'Generiere STL…';
 }
 
-const SAMPLE_ROOM = `raum
-110,78,35
-2.5
-licht
-41,40,ende,idc
-vorne
-16,15,12,15
-48,4,13,26
--16,15,12,15
-hinten
-15,4,22.5,26
-72.5,4,22.5,26
-42
-links
-14,15,11,15
-53,15,11,15
-42
-rechts
-14,15,11,15
-53,15,11,15
-42
-wand
-41,0,41,20,66,20,66,0
-dach
-50,10,plcc2
-text
-Musterhaus
-`;
+// ── Vorlagenmenü ─────────────────────────────────────────────────────────────
+// Der Server liefert die Pfade aller Dateien aus dem data-Ordner mit; den Inhalt
+// holt selectSample() einzeln nach.
+let SAMPLES = [];
+try {
+  // Wird index.html direkt aus dem Dateisystem geöffnet, steht hier der rohe
+  // Platzhalter – dann bleibt die Liste leer und das Menü verschwindet.
+  SAMPLES = JSON.parse(document.getElementById('sample-index').textContent);
+} catch (e) {
+  SAMPLES = [];
+}
 
-const SAMPLE_BOX = `box
-40,25,15
-oben
-plcc6
-3mm,-8
-5mm,8,1
-links
-ws2812, doppel, -2
-rechts
-plcc2, einfach, 4, -2
-`;
+const treeMenu   = document.getElementById('tree-menu');
+const treeToggle = document.getElementById('tree-toggle');
+const treePanel  = document.getElementById('tree-panel');
 
-function loadSample(variant) {
-  document.getElementById('csv').value = variant === 'box' ? SAMPLE_BOX : SAMPLE_ROOM;
-  updateHelp();
+// Flache Pfadliste → verschachtelte Knoten. Die Map bewahrt die Sortierung des
+// Servers.
+function buildSampleTree(paths) {
+  const root = { dirs: new Map(), files: [] };
+  for (const p of paths) {
+    const parts = p.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+      node = node.dirs.get(parts[i]);
+    }
+    node.files.push({ name: parts[parts.length - 1], path: p });
+  }
+  return root;
+}
+
+// Anzeigename: Dateiendung weg, Leerzeichen an den Rändern nur optisch entfernt.
+// Der Pfad zum Server bleibt unverändert.
+function sampleLabel(name, isFile) {
+  const shown = (isFile ? name.replace(/\.csv$/i, '') : name).trim();
+  return shown || name;
+}
+
+function renderSampleTree(node) {
+  const ul = document.createElement('ul');
+  for (const [name, child] of node.dirs) {
+    const li = document.createElement('li');
+    li.className = 'dir open';
+    const label = document.createElement('span');
+    label.className = 'node';
+    label.textContent = sampleLabel(name, false);
+    label.title = name;
+    label.addEventListener('click', () => li.classList.toggle('open'));
+    li.append(label, renderSampleTree(child));
+    ul.appendChild(li);
+  }
+  for (const f of node.files) {
+    const li = document.createElement('li');
+    li.className = 'file';
+    const label = document.createElement('span');
+    label.className = 'node';
+    label.textContent = sampleLabel(f.name, true);
+    label.title = f.path;
+    label.addEventListener('click', () => selectSample(f.path));
+    li.appendChild(label);
+    ul.appendChild(li);
+  }
+  return ul;
+}
+
+function openSampleMenu()   { treePanel.hidden = false; treeToggle.setAttribute('aria-expanded', 'true'); }
+function closeSampleMenu()  { treePanel.hidden = true;  treeToggle.setAttribute('aria-expanded', 'false'); }
+function toggleSampleMenu() { treePanel.hidden ? openSampleMenu() : closeSampleMenu(); }
+
+function treeToggleKey(e) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSampleMenu(); }
+}
+
+// Klick außerhalb des Menüs schließt es; der Toggle selbst liegt innerhalb.
+document.addEventListener('click', function(e) {
+  if (!treeMenu.contains(e.target)) closeSampleMenu();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && !treePanel.hidden) { closeSampleMenu(); treeToggle.focus(); }
+});
+
+if (SAMPLES.length) {
+  treePanel.appendChild(renderSampleTree(buildSampleTree(SAMPLES)));
+} else {
+  treeToggle.style.display = 'none';
+}
+
+async function selectSample(path) {
+  closeSampleMenu();
+  const box = document.getElementById('error-box');
+  box.innerHTML = '';
+  try {
+    const resp = await fetch('/sample?path=' + encodeURIComponent(path));
+    if (!resp.ok) {
+      const msg = await resp.text();
+      box.innerHTML = '<div class="error">' + msg.replace(/</g, '&lt;') + '</div>';
+      return;
+    }
+    document.getElementById('csv').value = await resp.text();
+    updateHelp();
+    loadPreview();
+  } catch (e) {
+    box.innerHTML = '<div class="error">Verbindungsfehler: ' + e.message + '</div>';
+  }
 }
 
 // Box-Modus, sobald irgendeine Zeile mit dem Schlüsselwort "box" beginnt

@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY server.py house_mask.scad lightbox.scad index.html ./
+COPY data/ ./data/
 
 EXPOSE 8080
 
