@@ -770,12 +770,12 @@ _LICHT_W = 41
 _LICHT_D = 36
 
 # Gravur der Stockwerksnummer: Rand zur Dachkante und Ziffernbreite bei size=5
-_FLOOR_LABEL_MARGIN = 2
 _FLOOR_LABEL_W = 3
 
 # Automatikposition eines text-Eintrags ohne Koordinaten: Abstand zur vorderen
 # linken Ecke des Druckkörpers, also einschließlich Druckversatz.
-_TEXT_AUTO_MARGIN = 2
+_TEXT_AUTO_MARGIN_X = 4.5
+_TEXT_AUTO_MARGIN_Y = 1.5
 
 
 def _resolve_licht_coord(offset, outer_size):
@@ -1015,8 +1015,8 @@ def generate_scad(sections: dict) -> str:
     text_rows = [
         [
             t[0],
-            po_le + _TEXT_AUTO_MARGIN if t[1] is None else t[1],
-            po_fr + _TEXT_AUTO_MARGIN if t[2] is None else t[2],
+            po_le + _TEXT_AUTO_MARGIN_X if t[1] is None else t[1],
+            po_fr + _TEXT_AUTO_MARGIN_Y if t[2] is None else t[2],
             t[3],
         ]
         for t in sections.get("text", [])
@@ -1027,8 +1027,8 @@ def generate_scad(sections: dict) -> str:
         # von der rechten Kante einrücken.
         text_rows.append([
             str(floor),
-            w - po_ri - _FLOOR_LABEL_MARGIN - _FLOOR_LABEL_W,
-            po_fr + _FLOOR_LABEL_MARGIN,
+            w - po_ri - _TEXT_AUTO_MARGIN_X - _FLOOR_LABEL_W,
+            po_fr + _TEXT_AUTO_MARGIN_Y,
             0,
         ])
 

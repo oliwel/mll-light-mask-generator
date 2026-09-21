@@ -88,8 +88,8 @@ IDC_STACK = 2; // nur die Grundplatte als Führung für die Platinenverbinder;
 idc_pitch = 2.54; // Rastermaß IDC [mm]
 idc_cols  = 3;    // Kontakte in X
 idc_rows  = 2;    // Kontakte in Y
-idc_in_w  = 12;   // Innenmaß der Tasche in X [mm]
-idc_in_d  = 7;    // Innenmaß der Tasche in Y [mm]
+idc_in_w  = 12.4; // Innenmaß der Tasche in X, lt. Standard 12.19 [mm]
+idc_in_d  = 7;    // Innenmaß der Tasche in Y, lt. Standard 6.8 [mm]
 idc_gap   = 6;    // Oberkante der Grundplatte über dem Tunnelboden [mm]
 idc_base  = 1;  // Dicke der Grundplatte mit den Kontaktlöchern [mm]
 idc_hole  = 1.4;  // Öffnung je Kontaktkammer [mm]
@@ -103,17 +103,17 @@ idc_ext   = max(0, idc_off_x + idc_in_w/2 + tunnel_wall - (tunnel_w/2 + tunnel_w
 
 // Oberkante der Grundplatte: die Buchse braucht darunter die Steckertasche, die
 // Führung besteht nur aus der Grundplatte selbst.
-function idc_base_z(mode) = mode == IDC_STACK ? idc_base : idc_gap;
+function idc_base_z(idc_mode) = idc_mode == IDC_STACK ? idc_base : idc_gap;
 // Verbreiterung nur für die Steckertasche; die Führung bleibt im Tunnelquerschnitt,
 // damit gestapelte Räume dieselbe Außenkontur behalten.
-function idc_mode_ext(mode) = mode == IDC_STACK ? 0 : idc_ext;
+function idc_mode_ext(idc_mode) = idc_mode == IDC_STACK ? 0 : idc_ext;
 
 // Positivteil: Sockel bis zur Grundplatten-Oberkante plus Fase darüber.
-module idc_socket_body(mode, wall = tunnel_wall) {
-    eps    = 0.01;             // Überlappung der beiden Fasenhälften
-    base_z = idc_base_z(mode); // Oberkante der Grundplatte
-    ramp   = tunnel_d/2;       // 45°-Fase von der Tunnelwand bis zur Mitte
-    body_w = tunnel_w + 2*wall + idc_mode_ext(mode);
+module idc_socket_body(idc_mode, wall = tunnel_wall) {
+    eps    = 0.01;                 // Überlappung der beiden Fasenhälften
+    base_z = idc_base_z(idc_mode); // Oberkante der Grundplatte
+    ramp   = tunnel_d/2;           // 45°-Fase von der Tunnelwand bis zur Mitte
+    body_w = tunnel_w + 2*wall + idc_mode_ext(idc_mode);
 
     translate([-(tunnel_w/2 + wall), 0, 0]) {
         // Sockel über den gesamten Tunnelquerschnitt
@@ -137,17 +137,17 @@ module idc_socket_body(mode, wall = tunnel_wall) {
 
 // Negativteil: Steckertasche, Kodiernase und Kontaktkammern. Die Führung
 // (IDC_STACK) hat keine Tasche, die Grundplatte liegt dort direkt am Tunnelboden.
-module idc_socket_cavity(tunnel_h, mode, wall = tunnel_wall) {
-    pocket_z = idc_base_z(mode) - idc_base;   // Taschendecke = Unterseite Grundplatte
+module idc_socket_cavity(tunnel_h, idc_mode, wall = tunnel_wall) {
+    pocket_z = idc_base_z(idc_mode) - idc_base; // Taschendecke = Unterseite Grundplatte
 
-    if (mode != IDC_STACK) {
+    if (idc_mode != IDC_STACK) {
         // Steckertasche, nach z = 0 offen
         translate([idc_off_x, 0, pocket_z/2 - 0.05])
             cube([idc_in_w, idc_in_d, pocket_z + 0.1], true);
 
         // Kodiernase des Steckers in der Vorderwand
         translate([idc_off_x, -idc_in_d/2 - wall/2, pocket_z/2 - 0.05])
-            cube([idc_pitch, wall + 0.1, pocket_z + 0.1], true);
+            cube([4, wall + 0.1, pocket_z + 0.1], true);
     }
 
     // Kontaktkammern durch Grundplatte und Fase bis über die Tunneloberkante,
