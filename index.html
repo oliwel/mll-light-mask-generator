@@ -46,7 +46,7 @@
     flex: 1;
   }
   .left {
-    width: 340px;
+    width: 400px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -89,9 +89,81 @@
   .tree-panel .dir.open > .node::before { content: '\25BE'; }
   .tree-panel .file > .node::before { content: '\00B7'; display: inline-block; width: 1em; color: #bbb; }
   .tree-panel .dir:not(.open) > ul { display: none; }
+  /* Assistent: modaler Dialog für eine Basiskonfiguration */
+  #wizard-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  #wizard-backdrop[hidden] { display: none; }
+  #wizard {
+    width: 480px;
+    max-width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    padding: 1rem 1.25rem;
+  }
+  #wizard h2 { font-size: 1.05rem; margin-bottom: 0.75rem; }
+  #wizard .wf-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+  #wizard .wf-row[hidden] { display: none; }
+  #wizard .wf-row label { font-weight: normal; font-size: 0.85rem; color: #333; white-space: nowrap; }
+  #wizard .wf-row input[type="text"],
+  #wizard .wf-row input[type="number"] {
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 4.5rem;
+  }
+  #wizard .wf-row input#wf-name { width: 14rem; }
+  #wizard .wf-row select {
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+  }
+  #wizard .wf-hint { color: #888; font-size: 0.78rem; margin: -0.3rem 0 0.6rem; }
+  #wizard fieldset.wf-wall {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.5rem 0.7rem 0.7rem;
+    margin-bottom: 0.7rem;
+  }
+  #wizard fieldset.wf-wall legend { font-size: 0.85rem; padding: 0 0.3rem; }
+  #wizard .wf-kind { display: flex; gap: 0.9rem; margin-bottom: 0.4rem; font-size: 0.8rem; }
+  #wizard .wf-kind label { display: flex; align-items: center; gap: 0.3rem; font-weight: normal; }
+  #wizard .wf-win { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  #wizard .wf-win label { font-size: 0.78rem; color: #666; width: 4.5rem; flex: none; }
+  #wizard .wf-win input { width: 3rem; }
+  #wizard .wf-part { display: flex; align-items: center; gap: 0.4rem; }
+  #wizard .wf-part label { font-size: 0.78rem; color: #666; }
+  #wizard .wf-part input { width: 3.5rem; }
+  #wizard .wf-error {
+    background: #fdecea;
+    border: 1px solid #f28b82;
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.78rem;
+    color: #b33;
+    margin-bottom: 0.6rem;
+  }
+  #wizard .wf-buttons { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+  #wizard .wf-buttons button { flex: none; width: auto; padding: 0.5rem 1rem; }
   textarea {
     flex: 1;
-    min-height: 120px;
+    min-height: 200px;
     font-family: monospace;
     font-size: 0.85rem;
     padding: 0.5rem;
@@ -232,6 +304,7 @@
            onclick="toggleSampleMenu()" onkeydown="treeToggleKey(event)">Vorlage laden &#9662;</a>
         <div class="tree-panel" id="tree-panel" hidden></div>
       </div>
+      <a role="button" tabindex="0" onclick="openWizard()" onkeydown="wizardTriggerKey(event)">Assistent</a>
     </div>
     <textarea id="csv" placeholder="raum&#10;100,80,30&#10;vorne&#10;15,10,8,8&#10;…">{{csv}}</textarea>
     <div id="error-box"></div>
@@ -249,18 +322,17 @@
     <p class="hint"><b>Raum:</b> <code>raum</code><br>
       Format: Breite, Tiefe, Höhe<br>
       Optional: Offset/Stärke der Außenwand (alle / x,y / v,r,h,l)<br>
-      Optional: Fussbodenhöhe als letzter Wert (<code>x,y,fb</code> /
-      <code>v,r,h,l,fb</code>) – wird von jeder Fensterhöhe abgezogen<br>
+      Optional: Fussbodenhöhe als letzter Wert (x,y,fb / v,r,h,l,fb) – wird von jeder Fensterhöhe abgezogen<br>
       Optional: Stockwerk <code>G&lt;n&gt;</code> als eigene Zeile (G0 = Erdgeschoss)
     </p>
     <p class="hint"><b>Hausplatine</b>: <code>licht</code><br>
-      <i>Für mehrstöckige Häuser: Stockwerkangabe <code>G&lt;n&gt;</code> im Abschnitt <code>raum</code></i><br>
       Format: offset_x, offset_y, (schalter), (anschluss)<br>
       Ursprung: vorne links zur Mitte der Platine!<br>
       Ohne Werte: zentriert<br>
       Schalterposition: <code>weiter</code>, <code>ende</code><br>
       Anschluss: <code>idc</code> IDC Buchse, <code>stack</code> nur Führung<br>
       Abschnitt weglassen = keine Platine<br>
+      <i>Für mehrstöckige Häuser: Stockwerkangabe <code>G&lt;n&gt;</code> im Abschnitt <code>raum</code> setzen um die Platine zu drehen!</i><br>
     </p>
     <p class="hint"><b>Fenster</b>: <code>vorne</code>, <code>hinten</code>, <code>links</code>, <code>rechts</code>, <br>
       Eine Öffnung = eine Zeile<br>
@@ -563,6 +635,60 @@ function updateMeasureLabel() {
 </script>
 
 <!-- Liste der Vorlagen aus dem data-Ordner, vom Server eingesetzt. -->
+<div id="wizard-backdrop" hidden>
+  <div id="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+    <h2 id="wizard-title">Assistent &ndash; Basiskonfiguration</h2>
+    <div id="wizard-error" class="wf-error" hidden></div>
+
+    <div class="wf-row">
+      <label for="wf-name">Hausname</label>
+      <input type="text" id="wf-name" value="Musterhaus" maxlength="50">
+    </div>
+
+    <div class="wf-row">
+      <label for="wf-w">Breite</label>
+      <input type="number" id="wf-w" value="110" min="1" step="any">
+      <label for="wf-d">Tiefe</label>
+      <input type="number" id="wf-d" value="78" min="1" step="any">
+      <label for="wf-h">H&ouml;he</label>
+      <input type="number" id="wf-h" value="35" min="1" step="any">
+    </div>
+    <p class="wf-hint" id="wf-room-hint" hidden></p>
+
+    <p class="wf-hint">Abmessungen des Hauses (Empfehlung: Außenmasse angeben und Maske durch Versatz anpassen).</p>
+
+    <div class="wf-row">
+      <label for="wf-offset-x">Versatz Breite</label>
+      <input type="number" id="wf-offset-x" value="2.5" min="0" step="any">
+      <label for="wf-offset-y">Versatz Tiefe</label>
+      <input type="number" id="wf-offset-y" value="2.5" min="0" step="any">
+    </div>
+    <p class="wf-hint">Um diesen Betrag wird die gedruckte Maske kleiner als der Raum: erster Wert links/rechts, zweiter Wert vorne/hinten.</p>
+
+    <div class="wf-row">
+      <label for="wf-floor">Stockwerk</label>
+      <select id="wf-floor" onchange="wizardFloorChanged()">
+        <option value="">kein Stockwerk</option>
+      </select>
+    </div>
+    <p class="wf-hint">Das Stockwerk dreht die Lichtplatine und erstellt Zapfen und Nasen zum Stapeln.</p>
+    <div class="wf-row" id="wf-fussboden-row" hidden>
+      <label for="wf-fussboden">Fussbodenh&ouml;he</label>
+      <input type="number" id="wf-fussboden" value="" min="0" step="any">
+    </div>
+    <p class="wf-hint" id="wf-floor-hint" hidden>H&ouml;he des Fussbodens dieses Stockwerks &uuml;ber dem Erdboden; wird von jeder Fensterh&ouml;he abgezogen.</p>
+
+    <b>Wände</b>
+    <p class="wf-hint" style="margin-top:0.25em">Definiere für die vier Aussenwände das erste Fenster und die Position der (ersten) Trennwand, weitere Fenster und Wände kannst du nachher in der Textbox einfügen!</p>
+    <div id="wf-walls"></div>
+
+    <div class="wf-buttons">
+      <button class="btn-preview" onclick="wizardApply()">&#9654; &Uuml;bernehmen</button>
+      <button class="btn-file" onclick="closeWizard()">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <script type="application/json" id="sample-index">{{samples}}</script>
 
 <script>
@@ -683,6 +809,218 @@ async function selectSample(path) {
   } catch (e) {
     box.innerHTML = '<div class="error">Verbindungsfehler: ' + e.message + '</div>';
   }
+}
+
+// ── Assistent ────────────────────────────────────────────────────────────────
+// Baut aus ein paar Eckdaten eine vollständige, sofort renderbare Definition und
+// schreibt sie in die Textarea. Bewusste Vereinfachungen, damit die Ausgabe immer
+// gültig ist:
+//   - Die Platine steht immer als "0,0,ende,idc" im licht-Abschnitt: bei der
+//     Koordinate 0 überspringt der Server die Abstandsprüfung der Platine und
+//     zentriert sie automatisch (server.py, _validate_geometry / generate_scad).
+//   - Fenstermaße werden vor dem Übernehmen gegen dieselben Grenzen geprüft wie
+//     server.py:_validate_geometry, damit niemand erst nach dem Übernehmen im
+//     roten Fehlerkasten landet.
+const WALL_SIDES = [
+  { key: 'vorne',  label: 'vorne',  lenOf: 'w', defaultKind: 'fenster' },
+  { key: 'rechts', label: 'rechts', lenOf: 'd', defaultKind: 'massiv' },
+  { key: 'hinten', label: 'hinten', lenOf: 'w', defaultKind: 'fenster' },
+  { key: 'links',  label: 'links',  lenOf: 'd', defaultKind: 'massiv' },
+];
+// Beispielhafte Fenstermaße, passend zur Hilfe und der Beispielmaske.
+const WF_WIN_DEFAULT = { x: 16, y: 15, b: 12, h: 15 };
+const _LICHT_W = 41, _LICHT_D = 36, _LICHT_MARGIN = 2; // wie in server.py
+
+function buildWizardWalls() {
+  const container = document.getElementById('wf-walls');
+  container.innerHTML = WALL_SIDES.map(side => `
+    <fieldset class="wf-wall" data-side="${side.key}">
+      <legend>${side.label}</legend>
+      <div class="wf-kind">
+        <label><input type="radio" name="wf-kind-${side.key}" value="keine"
+          onchange="wizardWallKindChanged('${side.key}')"> keine</label>
+        <label><input type="radio" name="wf-kind-${side.key}" value="massiv"
+          ${side.defaultKind === 'massiv' ? 'checked' : ''} onchange="wizardWallKindChanged('${side.key}')"> massiv</label>
+        <label><input type="radio" name="wf-kind-${side.key}" value="fenster"
+          ${side.defaultKind === 'fenster' ? 'checked' : ''} onchange="wizardWallKindChanged('${side.key}')"> Fenster</label>
+      </div>
+      <div class="wf-win">
+        <label>von links</label><input type="number" class="wf-wx" value="${WF_WIN_DEFAULT.x}" min="0" step="any">
+        <label>von unten</label><input type="number" class="wf-wy" value="${WF_WIN_DEFAULT.y}" min="0" step="any">
+      </div>
+      <div class="wf-win">
+        <label>Breite</label><input type="number" class="wf-wb" value="${WF_WIN_DEFAULT.b}" min="0.1" step="any">
+        <label>H&ouml;he</label><input type="number" class="wf-wh" value="${WF_WIN_DEFAULT.h}" min="0.1" step="any">
+      </div>
+      <div class="wf-part">
+        <label>Trennwand</label>
+        <input type="number" class="wf-part-pos" min="0" step="any" placeholder="">
+      </div>
+    </fieldset>`).join('');
+  WALL_SIDES.forEach(side => wizardWallKindChanged(side.key));
+}
+
+// Fensterfelder ausgrauen, wenn die Wand massiv ist oder ganz entfällt.
+function wizardWallKindChanged(sideKey) {
+  const fs = document.querySelector(`.wf-wall[data-side="${sideKey}"]`);
+  const kind = fs.querySelector('input[type="radio"]:checked').value;
+  fs.querySelectorAll('.wf-win').forEach(el => {
+    el.style.display = kind === 'fenster' ? 'flex' : 'none';
+  });
+}
+
+function wizardFloorChanged() {
+  const floorSel = document.getElementById('wf-floor').value;
+  const has = floorSel !== '' && floorSel !== '0';
+  document.getElementById('wf-fussboden-row').hidden = !has;
+  document.getElementById('wf-floor-hint').hidden = !has;
+}
+
+// Hinweis, wenn der Raum für die zentrierte Platine (41x36mm + 2mm Rand) zu
+// klein wäre. Blockiert nichts: bei Koordinate 0 überspringt der Server genau
+// diese Prüfung und zentriert die Platine so gut es geht.
+function wizardCheckRoomSize() {
+  const w = parseFloat(document.getElementById('wf-w').value) || 0;
+  const d = parseFloat(document.getElementById('wf-d').value) || 0;
+  const hint = document.getElementById('wf-room-hint');
+  const minW = _LICHT_W + 2 * _LICHT_MARGIN, minD = _LICHT_D + 2 * _LICHT_MARGIN;
+  if (w > 0 && d > 0 && (w < minW || d < minD)) {
+    hint.textContent = `Hinweis: Raum ist kleiner als die Platine braucht (mind. ${minW}×${minD}mm) – die Platine wird trotzdem zentriert eingesetzt.`;
+    hint.hidden = false;
+  } else {
+    hint.hidden = true;
+  }
+}
+
+function openWizard() {
+  if (!document.getElementById('wf-floor').options.length || document.getElementById('wf-floor').options.length === 1) {
+    for (let n = 0; n <= 9; n++) {
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = n === 0 ? 'G0 – Erdgeschoss' : `G${n}`;
+      document.getElementById('wf-floor').appendChild(opt);
+    }
+  }
+  buildWizardWalls();
+  wizardFloorChanged();
+  wizardCheckRoomSize();
+  document.getElementById('wizard-error').hidden = true;
+  document.getElementById('wizard-backdrop').hidden = false;
+  document.getElementById('wf-name').focus();
+}
+
+function closeWizard() {
+  document.getElementById('wizard-backdrop').hidden = true;
+}
+
+function wizardTriggerKey(e) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openWizard(); }
+}
+
+document.getElementById('wf-w').addEventListener('input', wizardCheckRoomSize);
+document.getElementById('wf-d').addEventListener('input', wizardCheckRoomSize);
+document.getElementById('wizard-backdrop').addEventListener('click', function(e) {
+  if (e.target === this) closeWizard();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && !document.getElementById('wizard-backdrop').hidden) closeWizard();
+});
+
+// Liest alle Felder des Dialogs in ein einfaches Objekt; keine Validierung.
+function readWizardValues() {
+  const num = id => parseFloat(document.getElementById(id).value);
+  const floorSel = document.getElementById('wf-floor').value;
+  const walls = {};
+  WALL_SIDES.forEach(side => {
+    const fs = document.querySelector(`.wf-wall[data-side="${side.key}"]`);
+    const partRaw = fs.querySelector('.wf-part-pos').value.trim();
+    walls[side.key] = {
+      kind: fs.querySelector('input[type="radio"]:checked').value,
+      x: parseFloat(fs.querySelector('.wf-wx').value),
+      y: parseFloat(fs.querySelector('.wf-wy').value),
+      b: parseFloat(fs.querySelector('.wf-wb').value),
+      h: parseFloat(fs.querySelector('.wf-wh').value),
+      partition: partRaw === '' ? null : parseFloat(partRaw),
+    };
+  });
+  return {
+    name: document.getElementById('wf-name').value,
+    w: num('wf-w'), d: num('wf-d'), h: num('wf-h'),
+    offsetX: num('wf-offset-x'), offsetY: num('wf-offset-y'),
+    floor: floorSel === '' ? null : parseInt(floorSel, 10),
+    fussboden: (floorSel === '' || floorSel === '0') ? null : (parseFloat(document.getElementById('wf-fussboden').value) || 0),
+    walls,
+  };
+}
+
+// Prüft Raummaße und jedes Fenster gegen dieselben Grenzen wie
+// server.py:_validate_geometry. Gibt eine Liste von Fehlertexten zurück; leer =
+// gültig.
+function validateWizardValues(v) {
+  const errors = [];
+  if (!(v.w > 0) || !(v.d > 0) || !(v.h > 0)) {
+    errors.push('Breite, Tiefe und Höhe müssen größer als 0 sein.');
+  }
+  WALL_SIDES.forEach(side => {
+    const wall = v.walls[side.key];
+    if (wall.kind !== 'fenster') return;
+    const wallLen = side.lenOf === 'w' ? v.w : v.d;
+    if (!(wall.b > 0) || !(wall.h > 0)) {
+      errors.push(`"${side.label}": Breite und Höhe der Öffnung müssen größer als 0 sein.`);
+      return;
+    }
+    const x0 = wall.x, x1 = wall.x + wall.b;
+    if (x0 < 0 || x1 > wallLen) {
+      errors.push(`"${side.label}": Fenster ${x0}–${x1} passt nicht in die Wand (0–${wallLen}).`);
+    }
+    const fb = v.fussboden || 0;
+    const z0 = wall.y - fb;
+    if (z0 < 0 || z0 + wall.h > v.h) {
+      errors.push(`"${side.label}": Fenster ${z0}–${z0 + wall.h} passt nicht in die Raumhöhe (0–${v.h}).`);
+    }
+  });
+  return errors;
+}
+
+// Reine Funktion: Eingabewerte rein, CSV-Text raus. Kein DOM-Zugriff, dadurch
+// einzeln testbar (siehe Plan, Abschnitt Verifikation).
+function buildWizardCsv(v) {
+  const RESERVED = ['raum', 'wand', 'vorne', 'hinten', 'links', 'rechts', 'licht', 'dach', 'druck', 'text'];
+  let name = (v.name || '').replace(/,/g, '').trim().slice(0, 50);
+  if (!name || RESERVED.includes(name.toLowerCase())) name = 'Musterhaus';
+
+  const lines = ['raum', `${v.w},${v.d},${v.h}`];
+  lines.push(v.fussboden != null ? `${v.offsetX},${v.offsetY},${v.fussboden}` : `${v.offsetX},${v.offsetY}`);
+  if (v.floor != null) lines.push(`G${v.floor}`);
+  lines.push('licht', '0,0,ende,idc');
+
+  WALL_SIDES.forEach(side => {
+    const wall = v.walls[side.key];
+    const rows = [];
+    if (wall.kind === 'fenster') rows.push(`${wall.x},${wall.y},${wall.b},${wall.h}`);
+    else if (wall.kind === 'massiv') rows.push('0,0,0,0');
+    if (wall.partition != null && !isNaN(wall.partition)) rows.push(`${wall.partition}`);
+    if (rows.length) lines.push(side.key, ...rows);
+  });
+
+  lines.push('text', name);
+  return lines.join('\n') + '\n';
+}
+
+function wizardApply() {
+  const v = readWizardValues();
+  const errors = validateWizardValues(v);
+  const errBox = document.getElementById('wizard-error');
+  if (errors.length) {
+    errBox.innerHTML = errors.map(m => m.replace(/</g, '&lt;')).join('<br>');
+    errBox.hidden = false;
+    return;
+  }
+  errBox.hidden = true;
+  document.getElementById('csv').value = buildWizardCsv(v);
+  updateHelp();
+  loadPreview();
+  closeWizard();
 }
 
 // Box-Modus, sobald irgendeine Zeile mit dem Schlüsselwort "box" beginnt
