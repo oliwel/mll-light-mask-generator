@@ -64,7 +64,6 @@ Server:     python3 server.py [--debug]
 """
 
 import csv as csv_module
-import html as h
 import io
 import json
 import logging
@@ -1181,16 +1180,14 @@ def _load_template() -> str:
         return f.read()
 
 
-def _render(csv_text: str = "") -> str:
-    # Erst die Vorlagenliste, dann den Definitionstext: csv_text stammt im
-    # Fehlerfall aus der Eingabe des Nutzers und darf keinen Platzhalter mehr
-    # auslösen. Die spitzen Klammern werden escaped, damit ein Dateiname das
-    # umgebende script-Element nicht beenden kann.
+def _render() -> str:
+    # Die spitzen Klammern werden escaped, damit ein Dateiname das umgebende
+    # script-Element nicht beenden kann.
     samples = (json.dumps(list_samples(), ensure_ascii=False)
                .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
     return (_load_template()
             .replace("{{samples}}", samples)
-            .replace("{{csv}}", csv_text))
+            .replace("{{csv}}", ""))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1327,9 +1324,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, "model/stl", stl_data)
         else:
             if error:
-                block = f'<div class="error">{h.escape(error)}</div>'
-                page = _render(h.escape(csv_content)).replace("{{error}}", block)
-                self._send(422, "text/html; charset=utf-8", page)
+                self._send(422, "text/plain; charset=utf-8", error)
             else:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
