@@ -1,0 +1,30 @@
+raum
+110,78,35
+2.5
+G0
+licht
+41,40,ende
+vorne
+16,15,12,15
+48,4,13,26
+-16,15,12,15
+hinten
+15,4,22.5,26
+72.5,4,22.5,26
+42
+links
+14,15,11,15
+53,15,11,15
+42
+rechts
+14,15,11,15
+53,15,11,15
+42
+wand
+# Trickkiste - der Flur trennt die Haustüre von der Lichtplatine aber durch
+# einen Ausschnitt in der Innenwand fällt Restlicht hinein wenn nebenan das Licht brennt
+41,0,41,20,flur,66,20,66,0
+flur
+5,5,10,5
+text
+Auhagen 11454

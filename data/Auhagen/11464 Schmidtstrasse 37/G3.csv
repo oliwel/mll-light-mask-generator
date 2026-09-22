@@ -1,0 +1,26 @@
+# Oberstes Stockwerk mit Schalterstellung für Dachplatine!
+# Bei Verzicht auf die Dachbeleuchtung Schalter auf "ende" stellen
+raum
+76,87,40
+3,5,125
+G3
+licht
+0,0,weiter,stack
+vorne
+7,132,12,22
+32,132,12,22
+-7,132,12,22
+25
+hinten
+10,134,12,23
+32,134,12,23
+-10,134,12,23
+25
+links
+0,0,0,0
+43.5
+rechts
+0,0,0,0
+43.5
+text
+Auhagen 11464
