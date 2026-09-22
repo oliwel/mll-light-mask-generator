@@ -7,7 +7,10 @@ CSV-Format:
   raum
   breite,tiefe,hoehe              (genau 3 Werte)
   offset                          (optional: 1/2/4 Werte → alle / x,y (wie breite,tiefe) /
-                                   vorne,rechts,hinten,links)
+                                   vorne,rechts,hinten,links; an die Zwei- oder Vierwertform
+                                   darf die Fussbodenhöhe angehängt werden (3 bzw. 5 Werte).
+                                   Sie wird von jeder Fensterhöhe abgezogen, die Fenster
+                                   werden dann durchgängig ab Erdboden gemessen.)
   G<n>                            (optionale eigene Zeile, Stockwerk 0–9 beim Stapeln;
                                    ungerades n → alle Platinen um 180 gedreht, Ziffer wird
                                    in die vordere rechte Ecke des Dachs graviert,
@@ -136,7 +139,7 @@ _BOX_LED_MARGIN = 5  # mm Mindestabstand der LED-Mitte zur Flächenkante
 _DACH_LED_R     = 5.5  # mm halbe max. LED-Öffnungsgröße (WS2812 Ø11) für Randprüfung
 
 _RULES = {
-    "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset]  [G<n>]"},
+    "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset[,fussboden]]  [G<n>]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]  |  x,y (Fortsetzung)"},
     "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
     "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]"},
@@ -588,7 +591,8 @@ def validate_and_parse(text: str) -> dict:
         max_rows = rule.get("max_rows")
         row_counts[current] += 1
 
-        # "raum": erste Zeile = 3 Werte, zweite Zeile = Offset (1/2/4 Werte)
+        # "raum": erste Zeile = 3 Werte, zweite Zeile = Offset (1/2/4 Werte),
+        # optional mit angehängter Fussbodenhöhe (3 oder 5 Werte)
         if current == "raum":
             if row_counts[current] == 1 and count != 3:
                 errors.append(
@@ -596,9 +600,10 @@ def validate_and_parse(text: str) -> dict:
                     f"(breite,tiefe,hoehe), gefunden: {count}"
                 )
                 continue
-            if row_counts[current] == 2 and count not in {1, 2, 4}:
+            if row_counts[current] == 2 and count not in {1, 2, 3, 4, 5}:
                 errors.append(
                     f'Zeile {lineno}: Abschnitt "raum" Offset-Zeile erwartet 1, 2 oder 4 Werte, '
+                    f"optional mit angehängter Fussbodenhöhe (3 oder 5 Werte), "
                     f"gefunden: {count}"
                 )
                 continue
@@ -739,12 +744,31 @@ def _split_wall(entries: list) -> tuple[list, list]:
     return wins, walls
 
 
-def _normalize_wins(wins: list, wall_len: int | float) -> list:
-    """Konvertiert negative Offsets in absolute Positionen für die SCAD-Ausgabe."""
+def _is_null_opening(win: list) -> bool:
+    """Breite 0 und Höhe 0 markieren eine massive Wand, keine echte Öffnung.
+
+    Der Eintrag bleibt von der Fussbodenhöhe unberührt, sonst rutschte er ins
+    Negative und die Höhenprüfung schlüge an.
+    """
+    return win[2] == 0 and win[3] == 0
+
+
+def _win_z(win: list, fussboden: float) -> float:
+    """Höhe der Unterkante im Koordinatensystem der Maske."""
+    return win[1] if _is_null_opening(win) else win[1] - fussboden
+
+
+def _normalize_wins(wins: list, wall_len: int | float, fussboden: float = 0) -> list:
+    """Rechnet Öffnungen in absolute Maskenkoordinaten für die SCAD-Ausgabe um.
+
+    Negative Offsets werden von der Gegenseite aus aufgelöst, die Höhe um die
+    Fussbodenhöhe des Stockwerks verringert.
+    """
     result = []
-    for offset, z0, size, height in wins:
+    for win in wins:
+        offset, _, size, height = win
         x0, _ = _resolve_opening_x(offset, size, wall_len)
-        result.append([x0, z0, size, height])
+        result.append([x0, _win_z(win, fussboden), size, height])
     return result
 
 
@@ -762,18 +786,24 @@ def _normalize_walls_inverted(walls: list, wall_len: int | float) -> list:
     return result
 
 
-def _normalize_offset(offset_row: list | None) -> list:
-    """Normalisiert print_offset auf [vorne, rechts, hinten, links]."""
+def _normalize_offset(offset_row: list | None) -> tuple[list, float]:
+    """Zerlegt die Offset-Zeile in ([vorne, rechts, hinten, links], fussboden).
+
+    Die Fussbodenhöhe steht als letzter Wert hinter der Zwei- oder Vierwertform
+    (3 bzw. 5 Werte); ohne sie ist sie 0. Die Einwertform kann sie nicht tragen,
+    "2.5,45" wäre die bestehende achsenweise Form.
+    """
     if not offset_row:
-        return [0, 0, 0, 0]
+        return [0, 0, 0, 0], 0
     v = offset_row
+    fb = v[4] if len(v) == 5 else v[2] if len(v) == 3 else 0
     if len(v) == 1:
-        return [v[0], v[0], v[0], v[0]]
-    if len(v) == 2:
+        return [v[0], v[0], v[0], v[0]], fb
+    if len(v) in (2, 3):
         # Sonderfall: die Zweiwert-Form ist achsenweise als x,y zu lesen – wie die
         # Maßzeile breite,tiefe. x verkleinert links/rechts, y vorne/hinten.
-        return [v[1], v[0], v[1], v[0]]
-    return list(v)  # already 4
+        return [v[1], v[0], v[1], v[0]], fb
+    return list(v[:4]), fb  # 4 oder 5 Werte
 
 
 _LICHT_W = 41
@@ -807,7 +837,23 @@ def _resolve_opening_x(offset, size, wall_len):
     return (wall_len + offset - size), (wall_len + offset)
 
 
-def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
+def _height_error(label, win, room_h, fussboden):
+    """Meldung, wenn eine Öffnung nicht in die Wandhöhe passt; sonst None.
+
+    Bei gesetzter Fussbodenhöhe nennt die Meldung beide Bereiche, sonst wäre
+    nicht nachvollziehbar, woher die geprüften Zahlen stammen.
+    """
+    height = win[3]
+    z0 = _win_z(win, fussboden)
+    if 0 <= z0 and z0 + height <= room_h:
+        return None
+    herkunft = (f" (Eingabe {win[1]:.4g}–{win[1] + height:.4g} abzüglich "
+                f"Fussboden {fussboden:.4g})") if fussboden and not _is_null_opening(win) else ""
+    return (f"{label}: Höhe {z0:.4g}–{z0 + height:.4g}{herkunft} "
+            f"außerhalb des Raums (0–{room_h})")
+
+
+def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le, fussboden=0):
     errors = []
 
     wall_dims = {"vorne": w, "hinten": w, "links": d, "rechts": d}
@@ -822,11 +868,9 @@ def _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le):
                     f'"{sec}" Öffnung {idx}: horizontale Position {x0:.4g}–{x1:.4g} '
                     f"außerhalb der Wand (0–{horiz})"
                 )
-            if z0 < 0 or z0 + height > room_h:
-                errors.append(
-                    f'"{sec}" Öffnung {idx}: Höhe {z0}–{z0 + height} '
-                    f"außerhalb des Raums (0–{room_h})"
-                )
+            err = _height_error(f'"{sec}" Öffnung {idx}', e, room_h, fussboden)
+            if err:
+                errors.append(err)
 
     _LICHT_MARGIN = 2  # mm Mindestabstand zur Körperkante
     for idx, row in enumerate(sections.get("licht", []), 1):
@@ -913,7 +957,7 @@ def generate_scad(sections: dict) -> str:
 
     raum_rows = sections.get("raum", [[100, 80, 30]])
     w, d, room_h = raum_rows[0]
-    offset = _normalize_offset(raum_rows[1] if len(raum_rows) > 1 else None)
+    offset, fussboden = _normalize_offset(raum_rows[1] if len(raum_rows) > 1 else None)
 
     druck      = {row[0]: row[1] for row in sections.get("druck", [])}
     wand       = druck.get("wand",   0.8)
@@ -923,7 +967,8 @@ def generate_scad(sections: dict) -> str:
 
     po_fr, po_ri, po_ba, po_le = offset
 
-    geo_errors = _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le)
+    geo_errors = _validate_geometry(sections, w, d, room_h, po_fr, po_ri, po_ba, po_le,
+                                    fussboden)
     if geo_errors:
         raise ValidationError("\n".join(geo_errors))
 
@@ -950,14 +995,16 @@ def generate_scad(sections: dict) -> str:
                             f'Fensterwand "{nm}" Öffnung {k}: {wx:.4g}–{wx+ww:.4g} '
                             f"außerhalb der Wandlänge (0–{wall_len:.4g})"
                         )
-                    if wz < 0 or wz + wh > room_h:
-                        geo_errors2.append(
-                            f'Fensterwand "{nm}" Öffnung {k}: Höhe {wz:.4g}–{wz+wh:.4g} '
-                            f"außerhalb (0–{room_h})"
-                        )
+                    err = _height_error(f'Fensterwand "{nm}" Öffnung {k}',
+                                        win, room_h, fussboden)
+                    if err:
+                        geo_errors2.append(err)
                 cords = _clip_poly_wall([seg[0], seg[1]], po_le, w - po_ri, po_fr, d - po_ba)
                 if cords:
-                    cords.append(wins)
+                    # Fenster der Innenwände genauso auf Maskenkoordinaten bringen
+                    # wie die der Außenwände; die x-Position ist hier immer absolut.
+                    cords.append([[win[0], _win_z(win, fussboden), win[2], win[3]]
+                                  for win in wins])
                     named_walls.append(cords)
             else:
                 # Vollständig außerhalb liegende Segmente liefern None und
@@ -977,10 +1024,10 @@ def generate_scad(sections: dict) -> str:
     left_wins,  left_walls  = _split_wall(sections.get("links",  []))
     right_wins, right_walls = _split_wall(sections.get("rechts", []))
 
-    front_wins = _normalize_wins(front_wins, w)
-    back_wins  = _normalize_wins(back_wins,  w)
-    left_wins  = _normalize_wins(left_wins,  d)
-    right_wins = _normalize_wins(right_wins, d)
+    front_wins = _normalize_wins(front_wins, w, fussboden)
+    back_wins  = _normalize_wins(back_wins,  w, fussboden)
+    left_wins  = _normalize_wins(left_wins,  d, fussboden)
+    right_wins = _normalize_wins(right_wins, d, fussboden)
 
     front_walls = _normalize_walls(front_walls,          w)
     back_walls  = _normalize_walls_inverted(back_walls,  w)

@@ -249,6 +249,8 @@
     <p class="hint"><b>Raum:</b> <code>raum</code><br>
       Format: Breite, Tiefe, Höhe<br>
       Optional: Offset/Stärke der Außenwand (alle / x,y / v,r,h,l)<br>
+      Optional: Fussbodenhöhe als letzter Wert (<code>x,y,fb</code> /
+      <code>v,r,h,l,fb</code>) – wird von jeder Fensterhöhe abgezogen<br>
       Optional: Stockwerk <code>G&lt;n&gt;</code> als eigene Zeile (G0 = Erdgeschoss)
     </p>
     <p class="hint"><b>Hausplatine</b>: <code>licht</code><br>
@@ -264,6 +266,7 @@
       Eine Öffnung = eine Zeile<br>
       Format: x_start, y_start, Breite, Höhe<br>
       Ursprung je Wand unten, links<br>
+      Mit Fussbodenhöhe: y_start ab Erdboden<br>
       Einzelne Zahl = Trennwand (automatisch)<br>
       Zwei Zahlen = Trennwand mit Länge<br>
       Keine Fenster = keine Wand!<br>

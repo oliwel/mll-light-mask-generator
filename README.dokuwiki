@@ -99,12 +99,20 @@ Je nach Anzahl der Werte:
 | ''2.5'' | gleicher Offset auf **allen vier Seiten** |
 | ''2.5,1'' | wie die Maßzeile: erste Zahl = **Breite** (links & rechts), zweite = **Tiefe** (vorne & hinten) |
 | ''2,1,2,1'' | je Seite einzeln: **vorne, rechts, hinten, links** |
+| ''2.5,1,45'' | wie ''2.5,1'', dazu die **Fussbodenhöhe** 45 (siehe unten) |
+| ''2,1,2,1,45'' | wie ''2,1,2,1'', dazu die **Fussbodenhöhe** 45 |
 
 <WRAP info>Die Reihenfolge unterscheidet sich zwischen den beiden Formen. Mit
 **zwei** Werten zählt die Zeile **Achsen** wie die Maßzeile: ''Breite, Tiefe''.
 Mit **vier** Werten zählt sie **Seiten** reihum ab vorne:
 ''vorne, rechts, hinten, links''. Die vier Seiten einzeln zu setzen heißt also
 nicht, einfach zwei Werte anzuhängen – ''2,1'' entspricht ''1,2,1,2''.</WRAP>
+
+**Fussbodenhöhe (optional, letzter Wert):** bei einem mehrstöckigen Haus misst man die Fensterhöhen bequemer **einmal durchgängig vom Erdboden** statt für jedes Stockwerk neu. Die Fussbodenhöhe sagt dem Generator, wie hoch der Fussboden dieses Stockwerks über dem Erdboden liegt; sie wird von jeder Höhenangabe einer Öffnung abgezogen. Liegt der Fussboden des ersten Obergeschosses 45 mm über dem Erdboden, wird aus einem bei 52 gemessenen Fenster eine Öffnung 7 mm über dem Boden der Maske.
+
+Sie steht immer als **letzter** Wert hinter der Zwei- oder Vierwertform. An die Einwertform lässt sie sich nicht anhängen – ''2.5,45'' wäre die Achsenform. Wer auf allen Seiten denselben Versatz will, schreibt also ''2.5,2.5,45''.
+
+<WRAP info>Die Fussbodenhöhe hat nichts mit der Stockwerkszeile ''G<n>'' zu tun. ''G<n>'' steuert Drehung, Gravur und Stapelecken, kennt aber keine Höhen – die Stockwerke dürfen unterschiedlich hoch sein. Beides wird getrennt angegeben.</WRAP>
 
 <code>
 raum
@@ -180,7 +188,7 @@ Tür) ist eine **eigene Zeile**.
 **Format:** Abstand, Höhe-über-Boden, Breite, Höhe
 
   * ''Abstand'' = horizontale Lage entlang der Wand, gemessen von der Ecke.
-  * ''Höhe-über-Boden'' = Abstand der **Unterkante** vom Boden.
+  * ''Höhe-über-Boden'' = Abstand der **Unterkante** vom Boden. Ist in der Offset-Zeile eine Fussbodenhöhe gesetzt, wird ab **Erdboden** gemessen statt ab dem Fussboden dieses Stockwerks.
   * ''Breite, Höhe'' = Größe der Öffnung.
 
 Der Ursprung jeder Wand liegt **unten links** (von außen betrachtet). Ein **negativer
