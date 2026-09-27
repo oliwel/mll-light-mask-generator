@@ -118,6 +118,9 @@ MAX_SAMPLE_PATH  = 512        # Zeichen im ?path=-Parameter
 
 KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
 DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
+# "maske" wählt die Farbgruppe für Multi-Material-/Mehrteil-Druck: innen/aussen/beide.
+# Anders als DRUCK_KEYS ist der Wert ein String, kein Maß.
+DRUCK_MASKE_VALUES = {"innen", "aussen", "beide"}
 
 # ── Lichtbox-Modus (Schlüsselwort "box") ────────────────────────────────────────
 # Eigener Renderer (lightbox.scad). "box" und "raum" schließen sich gegenseitig aus.
@@ -140,7 +143,7 @@ _DACH_LED_R     = 5.5  # mm halbe max. LED-Öffnungsgröße (WS2812 Ø11) für R
 _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset[,fussboden]]  [G<n>]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]  |  x,y (Fortsetzung)"},
-    "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
+    "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8 oder maske,innen)"},
     "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]"},
     "dach":   {"hint": "x,y,breite,tiefe  |  x,y,<ledtyp>"},
     "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
@@ -329,19 +332,29 @@ def validate_and_parse(text: str) -> dict:
             # Only intercept when a value cell is present (len >= 2); a lone keyword falls through
             # to section-switch handling so e.g. "dach" can still start the dach section.
             values_all = [c for c in row if c]
-            if current == "druck" and keyword in DRUCK_KEYS and len(values_all) >= 2:
-                if len(values_all) != 2 or not _numeric(values_all[1]):
-                    errors.append(
-                        f'Zeile {lineno}: Abschnitt "druck" erwartet "schluessel,wert", '
-                        f'z.B. "wand,0.8"'
-                    )
-                    continue
-                try:
-                    parsed = _parse_values([values_all[1]])
-                except ValidationError as e:
-                    errors.append(f"Zeile {lineno}: {e}")
-                    continue
-                sections[current].append([keyword, parsed[0]])
+            if current == "druck" and (keyword in DRUCK_KEYS or keyword == "maske") and len(values_all) >= 2:
+                if keyword == "maske":
+                    wert = values_all[1].lower() if len(values_all) == 2 else ""
+                    if len(values_all) != 2 or wert not in DRUCK_MASKE_VALUES:
+                        errors.append(
+                            f'Zeile {lineno}: Abschnitt "druck" erwartet für "maske" einen Wert '
+                            f'aus {sorted(DRUCK_MASKE_VALUES)}, z.B. "maske,innen"'
+                        )
+                        continue
+                    value = wert
+                else:
+                    if len(values_all) != 2 or not _numeric(values_all[1]):
+                        errors.append(
+                            f'Zeile {lineno}: Abschnitt "druck" erwartet "schluessel,wert", '
+                            f'z.B. "wand,0.8"'
+                        )
+                        continue
+                    try:
+                        value = _parse_values([values_all[1]])[0]
+                    except ValidationError as e:
+                        errors.append(f"Zeile {lineno}: {e}")
+                        continue
+                sections[current].append([keyword, value])
                 row_counts[current] += 1
                 continue
             # Stockwerks-Zeile "G<n>" im raum-Abschnitt — ebenfalls vor der Keyword-Prüfung.
@@ -960,9 +973,10 @@ def generate_scad(sections: dict) -> str:
 
     druck      = {row[0]: row[1] for row in sections.get("druck", [])}
     wand       = druck.get("wand",   0.8)
-    aussenwand = druck.get("aussen", wand)
-    innenwand  = druck.get("innen",  wand)
+    aussenwand = druck.get("aussen", 1.2)
+    innenwand  = druck.get("innen",  1.0)
     dachwand   = druck.get("dach",   1.0)
+    maske      = druck.get("maske",  "beide")
 
     po_fr, po_ri, po_ba, po_le = offset
 
@@ -1098,6 +1112,7 @@ def generate_scad(sections: dict) -> str:
         f"aussenwand   = {aussenwand};",
         f"innenwand    = {innenwand};",
         f"dachwand     = {dachwand};",
+        f'maske        = "{maske}";',
         f"poly_walls   = {_poly_walls_val(poly_walls)};",
         f"named_walls  = {_named_walls_val(named_walls)};",
         f"print_offset = {_list1d(offset)};",
