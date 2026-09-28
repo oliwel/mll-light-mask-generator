@@ -173,34 +173,31 @@ wall_back_inner  = room_depth  - po_ba - aussenwand;
 wall_left_inner  = po_le + aussenwand;
 wall_right_inner = room_width  - po_ri - aussenwand;
 
-// ── Nut/Feder an der Innenwand-Anschlussstelle ─────────────────────────────────
-// Ermöglicht getrennten Druck von Außen- (aussen) und Innen-Teil (innen): die
-// Innenwand ragt (unverändert in ihrer eigenen Wandstärke innenwand/tunnel_wall)
-// als Zapfen in die Außenwand bzw. das Dach hinein. An jeder Nut bleiben dabei
-// immer wand_nut_min_rest (0.8mm) Wand zur sichtbaren Außenfläche stehen — die
-// Nut füllt jeweils den kompletten Rest der Wandstärke aus. Bei einer Wand, die
-// nirgends dicker als 0.8mm ist, entfällt die Nut automatisch (reiner
-// Stumpfstoß), die sichtbare Außenfläche wird nie durchbrochen.
+// ── Nut/Feder zwischen Außenhülle und Innenkörper ─────────────────────────────
+// Ermöglicht getrennten Druck von Außen- (aussen) und Innen-Teil (innen):
+// Alle Innenwände und der Tunnel werden bis zur Außenkante des Körpers (bzw.
+// bis room_height) gebaut und anschließend mit einem Quader geschnitten, der an
+// allen Seiten außer dem Boden um "inset" kleiner ist als der Körper
+// (innen_koerper()).
+//   - inset = wand_nut_min_rest, Wandquerschnitt um wand_nut_spiel aufgeweitet:
+//     wird von der Außenhülle abgezogen → Nuten, an jeder Nut bleiben genau
+//     wand_nut_min_rest zur sichtbaren Außenfläche stehen, quer mit Spiel.
+//   - inset = wand_nut_min_rest + Längsspiel, normale Wandstärke:
+//     Druckteil innen → Zapfen mit Spiel an der Spitze.
+// Außenwand und Dach müssen deshalb mindestens wand_nut_min_rest dick sein
+// (Prüfung in server.py).
 wand_nut_min_rest = 0.8;  // bleibt an jeder Nut zur sichtbaren Außenfläche stehen [mm]
-wand_nut_spiel    = 0.15; // Spiel je Seite zwischen Zapfen und Nut (analog ecke_spiel)
-// wand_nut_depth/dach_nut_depth sind die REALE (gedruckte) Zapfenlänge — bereits
-// um wand_nut_spiel verkürzt, damit am Taschenboden Spiel bleibt und die
-// sichtbaren Flächen (Wandanschluss bzw. Dachunterseite) plan aufeinander
-// sitzen. Die Aussparung selbst (model_innen_grown(), grow=wand_nut_spiel)
-// erreicht dadurch wieder die volle Tiefe bis genau wand_nut_min_rest
-// Restwand — das Spiel steckt so ausschließlich am (unsichtbaren)
-// Taschenboden, nicht in der Restwandstärke.
-wand_nut_depth = max(0, aussenwand - wand_nut_min_rest - wand_nut_spiel);
-dach_nut_depth = max(0, dachwand  - wand_nut_min_rest - wand_nut_spiel);
-// Höhe, bis zu der Innenwände (front/back/left/right, poly_walls, named_walls)
-// gebaut werden: Dachunterseite plus Zapfenlänge in die Dach-Nut hinein.
-innen_top_z = (room_height - dachwand) + dach_nut_depth;
+wand_nut_spiel    = 0.1;  // Spiel je Seite zwischen Zapfen und Nut (analog ecke_spiel)
+// Längsspiel an der Zapfenspitze nur ab dieser Wand-/Dachstärke: darunter ist
+// die Nut so flach (< 0.2mm), dass das Spiel den Zapfen aufzehren und einen
+// Spalt zur Wand bzw. zum Dach lassen würde — dann wird ohne Längsspiel
+// gedruckt (Zapfen füllt die Nut in der Tiefe voll aus, Querspiel bleibt).
+wand_nut_spiel_ab = 1.0;
+wand_spiel_laengs = aussenwand < wand_nut_spiel_ab ? 0 : wand_nut_spiel;
+dach_spiel_laengs = dachwand   < wand_nut_spiel_ab ? 0 : wand_nut_spiel;
 
-// Gemeinsame Formeln für den "wall_t/grow"-Mechanismus (Innenwände, Tunnel):
-// jede Querschnittsseite wächst um grow, symmetrisch um dieselbe Mittelachse
-// wie ohne Wachstum — grow_off() ist der Versatz für translate(), grow_span()
-// die zugehörige (gewachsene) Kantenlänge. Bei grow=0 (reale Geometrie) sind
-// beide identisch zur ungewachsenen Form.
+// Aufweitung des Wandquerschnitts um grow je Seite, symmetrisch um dieselbe
+// Mittelachse: grow_off() = Versatz für translate(), grow_span() = Kantenlänge.
 function grow_off(t, grow)  = -t/2 - grow;
 function grow_span(t, grow) = t + 2*grow;
 
@@ -222,7 +219,7 @@ function licht_ref(px, py) = len(licht) > 0 ? licht[licht_nearest(px, py)] : [0,
 
 // Voller Ausschnitt-Fußabdruck (licht_w × licht_d) an der Lichtposition l,
 // Dicke h ab Höhe z0 — gemeinsame Geometrie für Dachausschnitt, Randrahmen-
-// Innenkante und den Freischnitt der Innenwände (innen_walls_all()).
+// Innenkante und die Vertiefung im Innenkörper (innen_koerper()).
 module licht_hole(l, z0, h) {
     translate([l[0] - licht_w/2, l[1] - licht_d/2, z0])
         cube([licht_w, licht_d, h]);
@@ -250,10 +247,7 @@ module licht_transform(l) {
 //   length          = Referenzlänge der Wand (volle Raumkante)
 //   inset_l/inset_r = Druckversatz an linker/rechter Wandkante (Panel-Verkürzung)
 //   windows         = [[x_von_links, y_ab_boden, breite, hoehe], ...]
-//   height          = Wandhöhe (Default room_height für Außenwände; benannte
-//                     Fensterwände (named_walls) sind Innenwände und übergeben
-//                     dafür innen_top_z, damit sie ebenfalls an der Dach-Nut
-//                     enden statt durchzuragen).
+//   height          = Wandhöhe (Default room_height)
 //   thickness       = Wanddicke in Y-Richtung (Default aussenwand für
 //                     Außenwände; named_wall() übergibt hier innenwand, s.u.).
 module wall_with_windows(length, inset_l, inset_r, windows, height = room_height, thickness = aussenwand) {
@@ -276,45 +270,38 @@ module wall_with_windows(length, inset_l, inset_r, windows, height = room_height
 // Aufbau: Vorder-/Hinterwand (15mm in X), center_fins (bei cx in Y),
 // Würfel 5×5×5mm außen links und rechts (ab Innenmass).
 
-// grow (>0, siehe grow_off()/grow_span() oben) wächst die beiden Kreuzwände
-// symmetrisch in der Dicke UND bringt (nur beim Freischnitt, grow=
-// wand_nut_spiel) die Einstecktiefe wieder auf die volle Tiefe zurück
-// (dach_nut_depth ist bereits um wand_nut_spiel verkürzt, s. Konstanten oben).
-// Standfuß, Tunnelbohrung und IDC-Buchse grenzen nicht an die Außen-/
-// Dachgruppe (liegen vollständig im Dachausschnitt, nicht im Randrahmen) —
-// beim Freischnitt (grow>0) werden sie deshalb ausgelassen, das spart unnötige
-// CGAL-Arbeit, ohne das Ergebnis zu ändern (dort ist ohnehin kein
-// Außenkörper-Material vorhanden).
+// Alle Teile laufen bis room_height; die Vertiefung im Dachausschnitt
+// (licht_h) und der Schnitt gegen das Dach entstehen erst in innen_koerper().
+// grow (>0) weitet nur die beiden Kreuzwände in der Dicke auf (Querspiel für
+// den Nut-Schnitt). Standfuß, Tunnelbohrung und IDC-Buchse liegen vollständig
+// im Dachausschnitt, berühren die Außenhülle also nie — für grow>0 werden sie
+// weggelassen (spart CGAL-Arbeit, gleiches Ergebnis).
 module tunnel(l, grow = 0) {
     cx  = l[0];   cy  = l[1];
     tw  = tunnel_w / 2;
     td  = tunnel_d / 2;
     tw_g = tunnel_w + 2* tunnel_wall;
     td_g = tunnel_d + 2* tunnel_wall;
-    // 1mm Abstand für Platinenauflage
+    // Unterkante Platine (Einstecktiefe licht_h unter Dachoberkante)
     h   = room_height - licht_h;
-    h_top = h + dach_nut_depth + grow;
     // Anschlussart aus der Datenzeile: "idc" → IDC_PLUG, "stack" → IDC_STACK
     idc = is_undef(l[4]) ? IDC_NONE : l[4];
     ext = idc_mode_ext(idc);   // Verbreiterung der rechten Wand für die Buchse
 
-    // Kreuzwände: Länge wächst um innenwand+grow über licht_w/licht_d hinaus
-    // (Padding je Seite), Dicke wächst um grow (siehe grow_off()/grow_span()).
+    // Kreuzwände: reichen je Seite innenwand über licht_w/licht_d hinaus in den
+    // Randrahmen-Streifen; Dicke und Stirnseiten wachsen um grow.
     module kreuzwaende() {
         translate([cx + grow_off(licht_w, innenwand + grow), cy + grow_off(innenwand, grow), 0])
-            cube([grow_span(licht_w, innenwand + grow), grow_span(innenwand, grow), h_top]);
+            cube([grow_span(licht_w, innenwand + grow), grow_span(innenwand, grow), room_height]);
         translate([cx + grow_off(innenwand, grow), cy + grow_off(licht_d, innenwand + grow), 0])
-            cube([grow_span(innenwand, grow), grow_span(licht_d, innenwand + grow), h_top]);
+            cube([grow_span(innenwand, grow), grow_span(licht_d, innenwand + grow), room_height]);
     }
 
     if (grow > 0) {
-        // Nur die Kreuzwände — Standfuß/Bohrung/IDC-Buchse berühren die
-        // Außen-/Dachgruppe nie und werden für den Freischnitt nicht gebraucht
-        // (spart unnötige CGAL-Arbeit, ohne das Ergebnis zu ändern).
         difference() {
             kreuzwaende();
             translate([cx - tw, cy - td, -0.1])
-                cube([tunnel_w, tunnel_d, h_top + 0.2]);
+                cube([tunnel_w, tunnel_d, room_height + 0.2]);
         }
     } else {
         difference() {
@@ -323,12 +310,12 @@ module tunnel(l, grow = 0) {
                     union() {
                         // Standfuss - solider Würfel bildet Pfeiler + X-Wände
                         translate([cx - tw_g/2, cy - td_g/2, 0])
-                            cube([tw_g + ext, td_g, h]);
+                            cube([tw_g + ext, td_g, room_height]);
                         kreuzwaende();
                     }
 
                     translate([cx - tw, cy - td, -0.1])
-                        cube([tunnel_w, tunnel_d, h_top + 0.2]);
+                        cube([tunnel_w, tunnel_d, room_height + 0.2]);
 
                 }
 
@@ -485,80 +472,34 @@ module mode_switch(l) {
 // poly_walls    = [[[x1,y1],[x2,y2],...], ...]
 // named_walls   = [[[x1,y1],[x2,y2],[[x,z0,b,h],...]], ...]
 //
-// Ein Wandende kann an einer Außenwand enden — üblicherweise wird es dabei bis
-// auf/über deren Außenfläche gezeichnet (einfachste Eingabe in der "wand"-
-// Sektion, ohne aussenwand kennen zu müssen). Damit die Außenwand eine
-// vollständig geschlossene, einfarbige Fläche bleibt, wird ein solcher Endpunkt
-// exakt auf die Innenfläche der betroffenen Außenwand gekappt und bekommt
-// dieselbe Nut/Feder wie die übrigen Innenwände (wand_nut_depth/-spiel).
-_pw_eps = 0.05; // Toleranz gegen Rundungsfehler beim Kantenvergleich
-function poly_wall_end_face(pt) =
-      pt[1] <= wall_front_inner + _pw_eps
-          && pt[0] >= wall_left_inner - _pw_eps && pt[0] <= wall_right_inner + _pw_eps ? 0
-    : pt[1] >= wall_back_inner  - _pw_eps
-          && pt[0] >= wall_left_inner - _pw_eps && pt[0] <= wall_right_inner + _pw_eps ? 1
-    : pt[0] <= wall_left_inner  + _pw_eps
-          && pt[1] >= wall_front_inner - _pw_eps && pt[1] <= wall_back_inner + _pw_eps ? 2
-    : pt[0] >= wall_right_inner - _pw_eps
-          && pt[1] >= wall_front_inner - _pw_eps && pt[1] <= wall_back_inner + _pw_eps ? 3
-    : -1;
-
-// Punkt, auf die Innenfläche der betroffenen Außenwand gekappt (nur die
-// betroffene Achse geändert).
-function poly_wall_clip(pt, face) =
-      face == 0 ? [pt[0], wall_front_inner]
-    : face == 1 ? [pt[0], wall_back_inner]
-    : face == 2 ? [wall_left_inner, pt[1]]
-    : [wall_right_inner, pt[1]];
+// Ein Wandende, das an einer Außenwand enden soll, wird bis auf/über deren
+// Außenfläche gezeichnet; der Schnittquader in innen_koerper() kappt es
+// automatisch und bildet dort den Zapfen.
 
 // Freistehende gerade Wand p1→p2 mit optionalen Fensteröffnungen (Dicke
-// wall_t, volle Höhe). poly_walls sind der Sonderfall ohne Fenster
+// innenwand, volle Höhe). poly_walls sind der Sonderfall ohne Fenster
 // (windows=[], siehe poly_walls_draw()). Fenster: [x, z0, breite, hoehe] –
 // x = Distanz entlang der Wand ab p1, z0 = Höhe ab Boden; wie bei den
-// Außenwänden vorne/hinten.
-// wall_t/grow: siehe grow_off()/grow_span() weiter oben — nur für den
-// Freischnitt im Außenkörper ungleich 0 (siehe model_innen_grown()).
-module named_wall(p1, p2, windows = [], wall_t = innenwand, grow = 0) {
-    f1 = poly_wall_end_face(p1);
-    f2 = poly_wall_end_face(p2);
-    q1 = f1 >= 0 ? poly_wall_clip(p1, f1) : p1;
-    q2 = f2 >= 0 ? poly_wall_clip(p2, f2) : p2;
-    // Versatz durch die Kappung an p1 (0, wenn dieses Ende nicht andockt).
-    // Fenster sind laut Doku "Distanz ab p1" — bleiben deshalb auf den
-    // ORIGINAL deklarierten Punkt p1 bezogen, nicht auf den gekappten q1.
-    clip1 = f1 >= 0 ? sqrt(pow(q1[0]-p1[0], 2) + pow(q1[1]-p1[1], 2)) : 0;
-    dx = q2[0] - q1[0];
-    dy = q2[1] - q1[1];
+// Außenwänden vorne/hinten. grow weitet die Wandstärke auf (Querspiel).
+module named_wall(p1, p2, windows = [], grow = 0) {
+    dx = p2[0] - p1[0];
+    dy = p2[1] - p1[1];
     len = sqrt(dx*dx + dy*dy);
-    // Zapfen über den gekappten Endpunkt hinaus, nur wo tatsächlich eine
-    // Außenwand anliegt (sonst schlichter Stumpfstoß). +grow bringt beim
-    // Freischnitt die Einstecktiefe auf die volle Tiefe zurück (wand_nut_depth
-    // ist bereits um wand_nut_spiel verkürzt). clip2 wird nicht gebraucht:
-    // ext2 hängt nur von wand_nut_depth/grow ab, Fenster sind nie an p2
-    // verankert.
-    ext1 = f1 >= 0 ? wand_nut_depth + grow : 0;
-    ext2 = f2 >= 0 ? wand_nut_depth + grow : 0;
-    // wall_with_windows() erhält als Länge (len+ext1+ext2) und beginnt bei
-    // lokal x=0 — durch das anschließende translate([-ext1,...]) sitzt dieses
-    // lokale x=0 bei U=-ext1 (U = Distanz ab q1 entlang der Wand). +ext1
-    // gleicht das aus, damit "w[0]-clip1" (Distanz ab p1, s.o.) tatsächlich
-    // bei U=w[0]-clip1 landet statt fälschlich bei U=w[0]-clip1-ext1.
-    win = [for (w = windows) [w[0] - clip1 + ext1, w[1], w[2], w[3]]];
-    translate([q1[0], q1[1], 0])
+    translate([p1[0], p1[1], 0])
         rotate([0, 0, atan2(dy, dx)])
-            translate([-ext1, grow_off(wall_t, grow), 0])
-                wall_with_windows(len + ext1 + ext2, 0, 0, win, innen_top_z + grow, grow_span(wall_t, grow));
+            translate([0, grow_off(innenwand, grow), 0])
+                wall_with_windows(len, 0, 0, windows, room_height, grow_span(innenwand, grow));
 }
 
-module poly_walls_draw(polys, wall_t = innenwand, grow = 0) {
+module poly_walls_draw(polys, grow = 0) {
     for (poly = polys)
         for (i = [0 : len(poly) - 2])
-            named_wall(poly[i], poly[i+1], [], wall_t, grow);
+            named_wall(poly[i], poly[i+1], [], grow);
 }
 
-module named_walls_draw(walls, wall_t = innenwand, grow = 0) {
+module named_walls_draw(walls, grow = 0) {
     for (nw = walls)
-        named_wall(nw[0], nw[1], nw[2], wall_t, grow);
+        named_wall(nw[0], nw[1], nw[2], grow);
 }
 
 // ── Innenwände ────────────────────────────────────────────────────────────────
@@ -572,28 +513,22 @@ module named_walls_draw(walls, wall_t = innenwand, grow = 0) {
 //   Z = Höhe
 //   v_edge = Y-Abstand Innenfläche → naher Rand des Dachausschnitts (Auto-Modus)
 //   u_c    = Position der Lichtmitte entlang X (Auto-Querelement)
-// wall_t/grow: siehe grow_off()/grow_span() weiter oben — nur für den
-// Freischnitt im Außenkörper ungleich 0 (siehe model_innen_grown()). +grow
-// bringt beim Freischnitt zugleich die Einstecktiefe auf die volle Tiefe
-// zurück (wand_nut_depth/innen_top_z sind bereits um wand_nut_spiel verkürzt).
-// Zapfen Richtung Außenwand direkt in die Hauptwand eingerechnet (kein eigenes
-// Tenon-Modul mehr): die Hauptwand beginnt bereits bei y = -(wand_nut_depth+grow)
-// statt bei y=0 und ist entsprechend länger.
-module inner_wall(p, len, v_edge, u_c, wall_t = innenwand, grow = 0) {
-    ext = wand_nut_depth + grow;
+// grow weitet die Wandstärke auf (Querspiel, siehe innen_koerper()).
+// Die Hauptwand beginnt an der Außenfläche der Außenwand (y = -aussenwand) und
+// läuft bis room_height; Zapfen und Dachanschluss schneidet innen_koerper().
+module inner_wall(p, len, v_edge, u_c, grow = 0) {
     if (len != -1) {
-        translate([p + grow_off(wall_t, grow), -ext, 0])
-            cube([grow_span(wall_t, grow), len + ext, innen_top_z + grow]);
+        translate([p + grow_off(innenwand, grow), -aussenwand, 0])
+            cube([grow_span(innenwand, grow), len + aussenwand, room_height]);
     } else {
-        // Hauptwand: von der Innenfläche (v=0, bündig/verschmelzend) bis zum
-        // Randrahmen. Kein Überstand in die Außenwand → ragt nie in ein Fenster.
-        translate([p + grow_off(wall_t, grow), -ext, 0])
-            cube([grow_span(wall_t, grow), v_edge + ext, innen_top_z + grow]);
+        // Hauptwand: von der Außenwand bis zum Randrahmen.
+        translate([p + grow_off(innenwand, grow), -aussenwand, 0])
+            cube([grow_span(innenwand, grow), v_edge + aussenwand, room_height]);
         // Querelement im Randrahmen-Streifen von p bis zur Lichtmitte (an
         // min(p,u_c) verankert statt zentriert, deshalb hier nicht über
         // grow_off()/grow_span() ausgedrückt).
-        translate([min(p, u_c) - wall_t/2 - grow, v_edge - wall_t - grow, 0])
-            cube([abs(p - u_c) + wall_t + 2*grow, wall_t + 2*grow, innen_top_z + grow]);
+        translate([min(p, u_c) - innenwand/2 - grow, v_edge - innenwand - grow, 0])
+            cube([abs(p - u_c) + innenwand + 2*grow, innenwand + 2*grow, room_height]);
     }
 }
 
@@ -602,34 +537,34 @@ module inner_wall(p, len, v_edge, u_c, wall_t = innenwand, grow = 0) {
 // serverseitig bereits passend (invertiert) geliefert.
 // Der Ansatzpunkt einer Wand liegt auf der Innenfläche ihrer Außenwand bei der
 // Position w[0]; er bestimmt, welcher Ausschnitt angefahren wird.
-module inner_walls_place(face, walls, wall_t = innenwand, grow = 0) {
+module inner_walls_place(face, walls, grow = 0) {
     if (face == 0)          // vorne: keine Drehung, nach innen = +Y
         translate([0, wall_front_inner, 0])
             for (w = walls) {
                 ref = licht_ref(w[0], wall_front_inner);
                 inner_wall(w[0], w[1],
-                           ref[1] - licht_d/2 - wall_front_inner, ref[0], wall_t, grow);
+                           ref[1] - licht_d/2 - wall_front_inner, ref[0], grow);
             }
     else if (face == 1)     // hinten: an Y gespiegelt
         translate([0, wall_back_inner, 0]) mirror([0, 1, 0])
             for (w = walls) {
                 ref = licht_ref(w[0], wall_back_inner);
                 inner_wall(w[0], w[1],
-                           wall_back_inner - (ref[1] + licht_d/2), ref[0], wall_t, grow);
+                           wall_back_inner - (ref[1] + licht_d/2), ref[0], grow);
             }
     else if (face == 2)     // links: X↔Y getauscht (Spiegelung)
         translate([wall_left_inner, 0, 0]) mirror([1, 0, 0]) rotate([0, 0, 90])
             for (w = walls) {
                 ref = licht_ref(wall_left_inner, w[0]);
                 inner_wall(w[0], w[1],
-                           ref[0] - licht_w/2 - wall_left_inner, ref[1], wall_t, grow);
+                           ref[0] - licht_w/2 - wall_left_inner, ref[1], grow);
             }
     else if (face == 3)     // rechts: 90°-Drehung
         translate([wall_right_inner, 0, 0]) rotate([0, 0, 90])
             for (w = walls) {
                 ref = licht_ref(wall_right_inner, w[0]);
                 inner_wall(w[0], w[1],
-                           wall_right_inner - (ref[0] + licht_w/2), ref[1], wall_t, grow);
+                           wall_right_inner - (ref[0] + licht_w/2), ref[1], grow);
             }
 }
 
@@ -637,30 +572,50 @@ module inner_walls_place(face, walls, wall_t = innenwand, grow = 0) {
 // Zwei Modelle für den Multi-Material-/Mehrteil-Druck:
 //   model_aussen() = Außenwände + Dach + Randrahmen + Stapelzapfen + Gravur
 //   model_innen()  = Innenwände + Tunnel-Struktur (Platinenhalter)
-// Beide wenden dieselben globalen Schnitte (ecken_cut, mode_switch) einzeln an;
-// den Freischnitt für die Nut/Feder übernimmt model_innen_grown() (s.u.).
-// Gesteuert über den CSV-Parameter "maske" (druck-Abschnitt: innen/aussen/beide,
-// Default "beide" für alte Datensätze).
-maske_mode = is_undef(maske) ? "beide" : maske;
+// Beide entstehen aus demselben Innenkörper (innen_koerper(), s.u.): die Hülle
+// zieht ihn mit Querspiel ab (→ Nuten), das Innenteil ist er selbst mit
+// zusätzlichem Spiel an den Zapfenspitzen.
+// Gesteuert über den CSV-Parameter "maske" (druck-Abschnitt):
+//   kompakt = beide Körper ineinander, als ein Gebäude (Multi-Material-Druck,
+//             Default, auch für alte Datensätze ohne "maske")
+//   beide   = beide Körper als getrennte Objekte nebeneinander (Einzeldruck)
+//   aussen / innen = nur der jeweilige Körper
+maske_mode = is_undef(maske) ? "kompakt" : maske;
+maske_spalt = 5; // Abstand zwischen Hülle und Innenteil bei maske="beide" [mm]
 
-// Alle Innenwände (ohne Tunnel) — geteilt zwischen model_innen() (Aufbau) und
-// model_innen_grown() (aufgeweiteter Freischnitt für den Außenkörper, s.u.).
-module innen_walls_all(wall_t = innenwand, grow = 0) {
+// Alle Innenwände (ohne Tunnel), ungekappt bis zur Außenkante.
+module innen_walls_all(grow = 0) {
+    inner_walls_place(0, front_walls, grow);
+    inner_walls_place(1, back_walls,  grow);
+    inner_walls_place(2, left_walls,  grow);
+    inner_walls_place(3, right_walls, grow);
+    poly_walls_draw(poly_walls, grow);
+    named_walls_draw(is_undef(named_walls) ? [] : named_walls, grow);
+}
+
+// Innenkörper: Innenwände + Tunnel, geschnitten mit einem Quader, der an allen
+// Seiten außer dem Boden kleiner ist als der Körper; danach die
+// licht_h-Vertiefung im Dachausschnitt und die Schalterkerbe (mode_switch).
+//   grow      = Aufweitung des Wandquerschnitts (Querspiel)
+//   inset     = Abstand des Schnittquaders zur Außenfläche der Außenwände
+//   inset_top = Abstand des Schnittquaders zur Dachoberseite
+module innen_koerper(grow, inset, inset_top) {
     difference() {
-        union() {
-            inner_walls_place(0, front_walls, wall_t, grow);
-            inner_walls_place(1, back_walls,  wall_t, grow);
-            inner_walls_place(2, left_walls,  wall_t, grow);
-            inner_walls_place(3, right_walls, wall_t, grow);
-            poly_walls_draw(poly_walls, wall_t, grow);
-            named_walls_draw(is_undef(named_walls) ? [] : named_walls, wall_t, grow);
+        intersection() {
+            union() {
+                innen_walls_all(grow);
+                for (l = licht) licht_transform(l) tunnel(l, grow);
+            }
+            translate([po_le + inset, po_fr + inset, -0.1])
+                cube([room_width  - po_le - po_ri - 2*inset,
+                      room_depth  - po_fr - po_ba - 2*inset,
+                      room_height - inset_top + 0.1]);
         }
-        // Dachausschnitt bleibt frei: Wände wachsen einheitlich bis innen_top_z
-        // (auch im Randrahmen-Streifen), das darf aber nie in die eigentliche
-        // Lichtöffnung hineinragen — deshalb hier pauschal wieder freischneiden.
         for (l = licht)
-            licht_transform(l)
-                licht_hole(l, -0.1, room_height + 0.2);
+            licht_transform(l) {
+                licht_hole(l, room_height - licht_h, licht_h + 0.1);
+                mode_switch(l);
+            }
     }
 }
 
@@ -719,12 +674,14 @@ module model_aussen() {
             if (geschoss_nr > 0)
                 ecken_pin();
 
-            for (t = texts)
-                translate([t[1], t[2], room_height - dachwand + 0.4])
-                    rotate([0, 0, t[3]])
-                        linear_extrude(height = dachwand)
-                            text(t[0], size = 5);
         } // union
+
+        // Gravur in die Dachoberseite
+        for (t = texts)
+            translate([t[1], t[2], room_height - dachwand + 0.4])
+                rotate([0, 0, t[3]])
+                    linear_extrude(height = dachwand)
+                        text(t[0], size = 5);
 
         // Aussparungen der Stapelecken, sobald ein Stockwerk angegeben ist
         if (geschoss_nr >= 0)
@@ -734,36 +691,39 @@ module model_aussen() {
         for (l = licht)
             licht_transform(l) mode_switch(l);
 
-        // Freischnitt für die Nut/Feder: dieselbe Innenkörper-Geometrie, aber
-        // um wand_nut_spiel aufgeweitet (model_innen_grown(), s.u.) — überall
-        // dort, wo der aufgeweitete Innenkörper den Außenkörper berührt
-        // (Wände, Randrahmen, Schalterhalterung, Ausrichtungshilfe, Dach),
-        // entsteht automatisch eine passende Aussparung.
-        model_innen_grown();
+        // Nuten: Innenkörper mit Querspiel, bis wand_nut_min_rest an die
+        // Außenfläche heran (Wände, Randrahmen, Dach).
+        innen_koerper(wand_nut_spiel, wand_nut_min_rest, wand_nut_min_rest);
     }
 }
 
+// Druckteil innen: Zapfen enden um das Längsspiel vor dem Nutgrund (bei dünner
+// Außenwand/Dach ohne Längsspiel, siehe wand_nut_spiel_ab).
 module model_innen() {
-    innen_walls_all();
-    for (l = licht) licht_transform(l) tunnel(l);
-}
-
-// Nur zum Freischneiden im Außenkörper (siehe model_aussen()) — keine eigene
-// Druckgeometrie. Dieselbe Geometrie wie model_innen(), aber mit um
-// wand_nut_spiel größeren Wandstärken/Tiefen, symmetrisch um dieselben
-// Mittelachsen/Ursprungspunkte gewachsen (kein Minkowski nötig).
-module model_innen_grown() {
-    innen_walls_all(innenwand, wand_nut_spiel);
-    for (l = licht) licht_transform(l) tunnel(l, wand_nut_spiel);
+    innen_koerper(0, wand_nut_min_rest + wand_spiel_laengs,
+                     wand_nut_min_rest + dach_spiel_laengs);
 }
 
 // ── Hauptgeometrie ────────────────────────────────────────────────────────────
 // Druckorientierung: Modell um die X-Achse kippen, so dass die Dachfläche
-// (ursprünglich Oberkante bei z=room_height) flach auf dem Druckbett (z=0) liegt.
+// (ursprünglich Oberkante bei z=room_height) flach auf dem Druckbett liegt.
+module dach_unten() {
+    translate([0, room_depth, 0]) rotate([180, 0, 0]) children();
+}
 
-translate([0, room_depth, 0]) rotate([180, 0, 0]) {
-    if (maske_mode == "aussen" || maske_mode == "beide")
+// Getrennt gedruckt (beide/innen) liegt das Innenteil gegenüber der Hülle um
+// 180° gedreht, also mit seiner Unterseite (z=0) auf dem Druckbett. Die
+// Auflagefläche liegt auf derselben Höhe wie die der Hülle (z = -room_height),
+// damit bei "beide" beide Objekte in einem STL gemeinsam aufliegen.
+if (maske_mode == "kompakt") {
+    dach_unten() {
         color([1, 0, 0]) model_aussen();
-    if (maske_mode == "innen" || maske_mode == "beide")
         color([1, 1, 0]) model_innen();
+    }
+} else {
+    if (maske_mode == "aussen" || maske_mode == "beide")
+        dach_unten() color([1, 0, 0]) model_aussen();
+    if (maske_mode == "innen" || maske_mode == "beide")
+        translate([maske_mode == "beide" ? room_width + maske_spalt : 0, 0, -room_height])
+            color([1, 1, 0]) model_innen();
 }

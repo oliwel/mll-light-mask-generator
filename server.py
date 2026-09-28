@@ -118,9 +118,13 @@ MAX_SAMPLE_PATH  = 512        # Zeichen im ?path=-Parameter
 
 KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
 DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
-# "maske" wählt die Farbgruppe für Multi-Material-/Mehrteil-Druck: innen/aussen/beide.
+# "maske" wählt die Ausgabe für Multi-Material-/Mehrteil-Druck:
+# kompakt (Gebäude, Default), beide (getrennte Objekte), innen, aussen.
 # Anders als DRUCK_KEYS ist der Wert ein String, kein Maß.
-DRUCK_MASKE_VALUES = {"innen", "aussen", "beide"}
+DRUCK_MASKE_VALUES = {"kompakt", "beide", "innen", "aussen"}
+# Mindeststärken [mm]: an jeder Nut bleibt wand_nut_min_rest (house_mask.scad)
+# zur sichtbaren Außenfläche stehen, Außenwand und Dach dürfen nicht dünner sein.
+DRUCK_MIN = {"aussen": 0.8, "dach": 0.8}
 
 # ── Lichtbox-Modus (Schlüsselwort "box") ────────────────────────────────────────
 # Eigener Renderer (lightbox.scad). "box" und "raum" schließen sich gegenseitig aus.
@@ -353,6 +357,12 @@ def validate_and_parse(text: str) -> dict:
                         value = _parse_values([values_all[1]])[0]
                     except ValidationError as e:
                         errors.append(f"Zeile {lineno}: {e}")
+                        continue
+                    if value < DRUCK_MIN.get(keyword, 0):
+                        errors.append(
+                            f'Zeile {lineno}: "{keyword}" muss mindestens '
+                            f'{DRUCK_MIN[keyword]} mm sein (Restwandstärke an den Nuten)'
+                        )
                         continue
                 sections[current].append([keyword, value])
                 row_counts[current] += 1
@@ -976,7 +986,7 @@ def generate_scad(sections: dict) -> str:
     aussenwand = druck.get("aussen", 1.2)
     innenwand  = druck.get("innen",  1.0)
     dachwand   = druck.get("dach",   1.0)
-    maske      = druck.get("maske",  "beide")
+    maske      = druck.get("maske",  "kompakt")
 
     po_fr, po_ri, po_ba, po_le = offset
 
