@@ -10,7 +10,7 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 1rem;
+    padding: 1rem 1rem 1.6rem;
     gap: 0.75rem;
     background: #f0f0f0;
   }
@@ -44,6 +44,7 @@
     display: flex;
     gap: 1rem;
     flex: 1;
+    min-height: 0;
   }
   .left {
     width: 400px;
@@ -51,7 +52,15 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+    min-height: 0;
   }
+  /* Hilfe: eigener Rollbereich, teilt sich die Höhe mit dem Textfeld */
+  .help-scroll { flex: 0 0 60%; min-height: 80px; overflow-y: auto; }
+  /* Trenner zwischen Eingabe und Hilfe, per Maus/Touch/Pfeiltasten verschiebbar */
+  .splitter { flex: none; height: 9px; margin: -2px 0; cursor: row-resize; touch-action: none; position: relative; }
+  .splitter::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; border-top: 1px solid #bbb; }
+  .splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { border-top: 3px solid #1a73e8; top: 3px; }
+  .splitter:focus { outline: none; }
   label { font-weight: bold; font-size: 0.95rem; }
   .label-row { display: flex; align-items: baseline; gap: 0.75rem; }
   .label-row a { font-size: 0.8rem; font-weight: normal; color: #555; cursor: pointer; }
@@ -163,7 +172,7 @@
   #wizard .wf-buttons button { flex: none; width: auto; padding: 0.5rem 1rem; }
   textarea {
     flex: 1;
-    min-height: 200px;
+    min-height: 80px;
     font-family: monospace;
     font-size: 0.85rem;
     padding: 0.5rem;
@@ -171,6 +180,23 @@
     border-radius: 4px;
     resize: none;
   }
+  /* Hilfe: Basis (Standard) und erweiterte Angaben, Markierung per Farbe/Symbol */
+  :root { --lvl-basis: #1a73e8; --lvl-opt: #8a8a8a; --lvl-adv: #b26a00; }
+  body.help-basic .adv { display: none; }
+  .help-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-size: 0.8rem; }
+  .hs { background: #fff; border-left: 3px solid var(--lvl-basis); border-radius: 3px; padding: 0.3rem 0.5rem; margin-top: 0.4rem; font-size: 0.8rem; line-height: 1.45; color: #444; }
+  .hs.adv { border-left-color: var(--lvl-adv); }
+  .hs h4 { font-size: 0.82rem; color: #222; margin-bottom: 0.15rem; }
+  .hs code { background: #e8e8e8; padding: 0 3px; border-radius: 2px; }
+  .hs .hr { margin-top: 0.1rem; }
+  .hs .hr.adv { border-left: 2px solid var(--lvl-adv); padding-left: 0.3rem; margin-left: -0.35rem; }
+  .hs .opt .k { font-style: italic; }
+  .hs .k { display: inline-block; min-width: 4.2rem; color: #777; font-size: 0.75rem; margin-right: 0.2rem; }
+  .hs .hr.adv .k { min-width: 0; }
+  .hs .warn { background: #fff6d6; border-radius: 3px; padding: 0.05rem 0.35rem; color: #6b5300; }
+  .hs .warn::before { content: '\26A0\00a0'; }
+  .hs .info { background: #e8f1fd; border-radius: 3px; padding: 0.05rem 0.35rem; color: #174ea6; }
+  .hs .info::before { content: '\1F6C8\00a0'; }
   .hint { color: #666; font-size: 0.82rem; line-height: 1.5; margin-top: 0.5em;}
   .hint code { background: #e0e0e0; padding: 0 3px; border-radius: 2px; }
   .error {
@@ -184,7 +210,14 @@
     max-height: 120px;
     overflow-y: auto;
   }
-  .buttons { display: flex; gap: 0.5rem; }
+  .export-format { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+  .export-format label { font-size: 0.85rem; }
+  /* Textauswahl: Links mit Markierung der aktiven Option durch Fettdruck und Haken */
+  .choice { font-size: 0.82rem; color: #444; }
+  .choice a { color: #1a73e8; cursor: pointer; margin-left: 0.5rem; }
+  .choice a:hover { text-decoration: underline; }
+  .choice a.sel { color: #222; font-weight: bold; text-decoration: none; cursor: default; }
+  .choice a.sel::before { content: '\2713'; margin-right: 0.15em; color: #2e7d32; }
   button {
     flex: 1;
     padding: 0.55rem 0;
@@ -194,6 +227,12 @@
     cursor: pointer;
     font-weight: 500;
   }
+  /* Aktionszeile: Textlinks mit kleinen Icons statt Buttons */
+  .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.85rem; }
+  .actions .sep { color: #bbb; }
+  .actions button.lnk { flex: none; padding: 0; background: none; border: none; border-radius: 0; font-size: inherit; font-weight: normal; color: #1a73e8; cursor: pointer; }
+  .actions button.lnk:hover:not(:disabled) { text-decoration: underline; }
+  .actions button.lnk:disabled { color: #aaa; cursor: default; }
   .btn-preview { background: #1a73e8; color: #fff; }
   .btn-preview:hover:not(:disabled) { background: #1558b0; }
   .btn-preview:disabled { background: #90b8f0; cursor: default; }
@@ -277,10 +316,14 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .footer {
+    position: sticky;
+    bottom: 0;
     flex-shrink: 0;
-    display: flex;
+    background: #f0f0f0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
+    gap: 0.75rem;
     font-size: 0.8rem;
     color: #666;
     border-top: 1px solid #ddd;
@@ -288,12 +331,17 @@
   }
   .footer a { color: #1a73e8; text-decoration: none; }
   .footer a:hover { text-decoration: underline; }
-  .footer .version { color: #999; }
+  .footer .version { color: #999; text-align: right; }
+  .footer .feedback { text-align: center; }
+  @media (max-width: 700px) {
+    .footer { grid-template-columns: 1fr; text-align: center; }
+    .footer .version { text-align: center; }
+  }
 </style>
 </head>
 <body>
 <h1><img src="data:image/png;base64,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">
-  MobaLedLib Hausmasken und Lichtmaskengenerator v0.6
+  MobaLedLib Hausmasken und Lichtmaskengenerator v0.7
   <a class="help-icon" href="https://wiki.mobaledlib.de/3d_druck/mll-masken-generator" target="_blank" rel="noopener" title="Hilfe / Dokumentation">Hilfe<span class="help-mark">?</span></a></h1>
 <div class="main">
   <div class="left">
@@ -308,78 +356,98 @@
     </div>
     <textarea id="csv" placeholder="raum&#10;100,80,30&#10;vorne&#10;15,10,8,8&#10;…">{{csv}}</textarea>
     <div id="error-box"></div>
-    <div class="buttons">
-      <button class="btn-preview" id="btn-preview" onclick="loadPreview()">&#9654; Vorschau</button>
-      <button class="btn-save" id="btn-save" onclick="saveStl()" disabled>&#8595; STL</button>
-      <button class="btn-save" id="btn-3mf" onclick="save3mf()" disabled>&#8595; 3MF</button>
+    <div class="export-format">
+      <label>Export:</label>
+      <input type="hidden" id="export-format" value="kompakt">
+      <span class="choice" id="export-choice">
+        <a role="button" tabindex="0" data-v="kompakt" title="Ein Gebäude in einem Stück (Hülle und Innenteil kompakt)">kompakt</a>
+        <a role="button" tabindex="0" data-v="beide" title="Hülle und Innenteil getrennt in einer Datei">beide</a>
+        <a role="button" tabindex="0" data-v="aussen" title="Nur die äußere Hülle">außen</a>
+        <a role="button" tabindex="0" data-v="innen" title="Nur das Innenteil">innen</a>
+      </span>
     </div>
-    <div class="buttons">
-      <button class="btn-file" onclick="loadCsvFile()">&#128194; Laden</button>
-      <button class="btn-file" onclick="saveCsvFile()">&#128190; Speichern</button>
+    <div class="actions">
+      <button class="lnk" id="btn-preview" onclick="loadPreview()" title="Vorschau des Modells erzeugen">&#9654; Vorschau</button>
+      <button class="lnk" id="btn-save" onclick="saveStl()" title="Vorschau als STL speichern" disabled>&#8595; STL</button>
+      <button class="lnk" id="btn-3mf" onclick="save3mf()" title="Modell als 3MF speichern" disabled>&#8595; 3MF</button>
+      <span class="sep">|</span>
+      <button class="lnk" onclick="loadCsvFile()" title="Konfiguration aus Datei laden">&#128194; Laden</button>
+      <button class="lnk" onclick="saveCsvFile()" title="Konfiguration als Datei speichern">&#128190; Speichern</button>
     </div>
     <input type="file" id="file-input" accept=".csv,.txt" style="display:none">
+    <div class="splitter" id="splitter" role="separator" aria-orientation="horizontal" tabindex="0" title="Ziehen, um die Höhe der Hilfe zu ändern"></div>
+    <div class="help-bar">
+      <span class="choice" id="help-choice">Hilfe:
+        <a role="button" tabindex="0" data-v="0" title="Nur die Basisangaben des Assistenten anzeigen (Standard)">Basis</a>
+        <a role="button" tabindex="0" data-v="1" title="Alle optionalen und fortgeschrittenen Angaben anzeigen">erweitert</a></span>
+    </div>
+    <div class="help-scroll">
     <div id="help-mask">
-    <p class="hint"><b>Raum:</b> <code>raum</code><br>
-      Format: Breite, Tiefe, Höhe<br>
-      Optional: Offset/Stärke der Außenwand (alle / x,y / v,r,h,l)<br>
-      Optional: Fussbodenhöhe als letzter Wert (x,y,fb / v,r,h,l,fb) – wird von jeder Fensterhöhe abgezogen<br>
-      Optional: Stockwerk <code>G&lt;n&gt;</code> als eigene Zeile (G0 = Erdgeschoss)
-    </p>
-    <p class="hint"><b>Hausplatine</b>: <code>licht</code><br>
-      Format: offset_x, offset_y, (schalter), (anschluss)<br>
-      Ursprung: vorne links zur Mitte der Platine!<br>
-      Ohne Werte: zentriert<br>
-      Schalterposition: <code>weiter</code>, <code>ende</code><br>
-      Anschluss: <code>idc</code> IDC Buchse, <code>stack</code> nur Führung<br>
-      Abschnitt weglassen = keine Platine<br>
-      <i>Für mehrstöckige Häuser: Stockwerkangabe <code>G&lt;n&gt;</code> im Abschnitt <code>raum</code> setzen um die Platine zu drehen!</i><br>
-    </p>
-    <p class="hint"><b>Fenster</b>: <code>vorne</code>, <code>hinten</code>, <code>links</code>, <code>rechts</code>, <br>
-      Eine Öffnung = eine Zeile<br>
-      Format: x_start, y_start, Breite, Höhe<br>
-      Ursprung je Wand unten, links<br>
-      Mit Fussbodenhöhe: y_start ab Erdboden<br>
-      Einzelne Zahl = Trennwand (automatisch)<br>
-      Zwei Zahlen = Trennwand mit Länge<br>
-      Keine Fenster = keine Wand!<br>
-      Massive Wand ohne Fenster <code>0,0,0,0</code>
-    </p>
-    <p class="hint"><b>Dach</b>: <code>dach</code><br>
-      Öffnungen wie Fenster, Ursprung vorne, links<br>
-      Alternativ: <code>plcc2</code>, <code>plcc6</code>, <code>ws2812</code>, <code>3mm</code>, <code>5mm</code>, <code>none</code>
-    </p>
-    <p class="hint"><b>Wände</b>: <code>wand</code><br>
-      Format: x_start, y_start, x_ecke1, y_ecke1,...<br>
-      Wand entlang mehrerer Punkte<br>
-      Zeile mit mehreren Paaren = neue Wand<br>
-      Zeile mit nur einem Paar = verlängert die vorige Wand<br>
-      x1,y1,name,x2,y2 = benannte Wand<br>
-    </p>
-    <p class="hint"><b>Druckparameter</b>: <code>druck</code><br>
-      Format: keyword,wert<br>
-      <code>wand</code>: Wandstärke<br>
-      <code>innen/aussen</code>: Wandstärke Innen/Außenwände<br>
-      <code>dach</code>: Wandstärke Dach
-    </p>
+    <section class="hs">
+      <h4><code>raum</code> Abmessungen</h4>
+      <div class="hr"><span class="k">Format</span> Breite, Tiefe, Höhe</div>
+      <div class="hr opt"><span class="k">Offset</span> x, y (Maske kleiner als Raum)</div>
+      <div class="hr adv"><span class="k">Offset-Varianten</span> ein Wert für alle Seiten oder v,r,h,l</div>
+      <div class="hr adv"><span class="k">Fussbodenhöhe</span> als letzter Wert (x,y,fb / v,r,h,l,fb); wird von jeder Fensterhöhe abgezogen</div>
+      <div class="hr opt"><span class="k">Stockwerk</span> <code>G&lt;n&gt;</code> als eigene Zeile (G0 = Erdgeschoss)</div>
+    </section>
+    <section class="hs">
+      <h4><code>licht</code> Hausplatine</h4>
+      <div class="hr"><span class="k">Format</span> offset_x, offset_y, (schalter), (anschluss)</div>
+      <div class="hr warn">Ursprung: vorne links zur Mitte der Platine!</div>
+      <div class="hr"><span class="k">Ohne Werte</span> zentriert</div>
+      <div class="hr opt"><span class="k">Schalter</span> <code>weiter</code>, <code>ende</code></div>
+      <div class="hr opt"><span class="k">Anschluss</span> <code>idc</code> IDC Buchse, <code>stack</code> nur Führung</div>
+      <div class="hr"><span class="k">Weglassen</span> Abschnitt weglassen = keine Platine</div>
+      <div class="hr info">Mehrstöckige Häuser: Stockwerk <code>G&lt;n&gt;</code> im Abschnitt <code>raum</code> setzen, um die Platine zu drehen.</div>
+    </section>
+    <section class="hs">
+      <h4><code>vorne</code> <code>hinten</code> <code>links</code> <code>rechts</code> Fenster</h4>
+      <div class="hr"><span class="k">Format</span> Links, Unten, Breite, Höhe &ndash; eine Öffnung pro Zeile</div>
+      <div class="hr info">Links/Unten = Abstand der Fensterecke zum Nullpunkt</div>
+      <div class="hr"><span class="k">Ursprung</span> je Wand unten, links</div>
+      <div class="hr adv"><span class="k">Mit Fussbodenhöhe</span> y_start ab Erdboden</div>
+      <div class="hr"><span class="k">Massiv</span> Wand ohne Fenster: <code>0,0,0,0</code></div>
+      <div class="hr"><span class="k">Trennwand</span> einzelne Zahl = Position (automatisch), zwei Zahlen = mit Länge</div>
+      <div class="hr warn">Keine Fenster = keine Wand!</div>
+    </section>
+    <section class="hs">
+      <h4><code>text</code> Beschriftung</h4>
+      <div class="hr"><span class="k">Format</span> Hausname (ohne Komma)</div>
+    </section>
+    <section class="hs adv">
+      <h4><code>dach</code> Dach</h4>
+      <div class="hr"><span class="k">Öffnungen</span> wie Fenster, Ursprung vorne, links</div>
+      <div class="hr"><span class="k">Alternativ</span> <code>plcc2</code>, <code>plcc6</code>, <code>ws2812</code>, <code>3mm</code>, <code>5mm</code>, <code>none</code></div>
+    </section>
+    <section class="hs adv">
+      <h4><code>wand</code> Innenwände</h4>
+      <div class="hr"><span class="k">Format</span> x_start, y_start, x_ecke1, y_ecke1, ...</div>
+      <div class="hr"><span class="k">Mehrere Paare</span> = neue Wand entlang mehrerer Punkte</div>
+      <div class="hr"><span class="k">Ein Paar</span> = verlängert die vorige Wand</div>
+      <div class="hr"><span class="k">Benannt</span> x1,y1,name,x2,y2</div>
+    </section>
+    <section class="hs adv">
+      <h4><code>druck</code> Druckparameter</h4>
+      <div class="hr"><span class="k">Format</span> keyword, wert</div>
+      <div class="hr"><code>innen</code> Innenwände (Standard 1.0, min. 0.8) &middot; <code>aussen</code> Außenwände (Standard 1.2, min. 0.8) &middot; <code>dach</code> Dach (Standard und min. 1.2)</div>
+    </section>
     </div>
     <div id="help-box" style="display:none">
-    <p class="hint"><b>Lichtbox</b>: <code>box</code><br>
-      Format: Breite, Höhe, Tiefe
-    </p>
-    <p class="hint"><b>LED-Flächen</b>: <code>oben</code>, <code>links</code>, <code>rechts</code><br>
-      Eine LED = eine Zeile<br>
-      Format: Typ, (Clip), (Offset&nbsp;Breite), (Offset&nbsp;Tiefe)<br>
-      Ursprung: Mitte der Fläche
-    </p>
-    <p class="hint"><b>LED-Typen</b>:
-      <code>3mm</code>, <code>5mm</code>, <code>plcc6</code>, <code>plcc2</code>, <code>ws2812</code>, <code>none</code>
-    </p>
-    <p class="hint"><b>Clip</b> (optional):
-      <code>ohne</code>, <code>einfach</code>, <code>doppel</code><br>
-      Standard: <code>ohne</code>
-    </p>
+    <section class="hs">
+      <h4><code>box</code> Lichtbox</h4>
+      <div class="hr"><span class="k">Format</span> Breite, Höhe, Tiefe</div>
+    </section>
+    <section class="hs">
+      <h4><code>oben</code> <code>links</code> <code>rechts</code> LED-Flächen</h4>
+      <div class="hr"><span class="k">Format</span> Typ, (Clip), (Offset&nbsp;Breite), (Offset&nbsp;Tiefe) &ndash; eine LED pro Zeile</div>
+      <div class="hr"><span class="k">Ursprung</span> Mitte der Fläche</div>
+      <div class="hr"><span class="k">Typen</span> <code>3mm</code>, <code>5mm</code>, <code>plcc6</code>, <code>plcc2</code>, <code>ws2812</code>, <code>none</code></div>
+      <div class="hr opt"><span class="k">Clip</span> <code>ohne</code>, <code>einfach</code>, <code>doppel</code> (Standard: <code>ohne</code>)</div>
+    </section>
     </div>
-    <p class="hint">Alle Angaben in Millimetern! Nachkommastellen sind mit Punkt als Trennzeichen möglich.</p>
+    <p class="hint">Alle Angaben in Millimetern! Nachkommastellen sind mit Punkt als Trennzeichen möglich. Der Ursprung ist immer die Ecke unten/links der Fläche.</p>
+    </div>
   </div>
   <div class="right" id="viewer-container">
     <div id="overlay">
@@ -393,20 +461,21 @@
 </div>
 <footer class="footer">
   <div class="imprint"><a href="https://shop.mobaledlib.de/impressum/" target="_blank" rel="noopener">Impressum</a> - <a href="https://shop.mobaledlib.de/datenschutzerklaerung/" target="_blank" rel="noopener">Datenschutz</a></div>
-  <span class="version"><a href="https://github.com/oliwel/mll-light-mask-generator" target="_blank" rel="noopener">github.com/oliwel/mll-light-mask-generator</a> - v0.6</span>
+  <div class="feedback"><a href="https://forum.mobaledlib.de/viewforum.php?f=148" target="_blank" rel="noopener">Fragen und Feedback im MLL Forum</a></div>
+  <span class="version"><a href="https://github.com/oliwel/mll-light-mask-generator" target="_blank" rel="noopener">github.com/oliwel/mll-light-mask-generator</a> - v0.7</span>
 </footer>
 
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+    "three": "/static/three/build/three.module.js",
+    "three/addons/": "/static/three/examples/jsm/"
   }
 }
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const container = document.getElementById('viewer-container');
@@ -479,46 +548,54 @@ const measureLabel = document.getElementById('measure-label');
   renderer.render(scene, camera);
 })();
 
-const loader = new STLLoader();
+const loader = new ThreeMFLoader();
 let mesh = null;
-let edges = null;
 let hadMesh = false;
-let currentBuffer = null;
 let modelR = 100;
 
-window._loadStlIntoViewer = function(buffer, opts) {
+function disposeModel(obj) {
+  obj.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    for (const m of [].concat(o.material || [])) m.dispose();
+  });
+}
+
+// Das Vorschaumodell kommt als 3MF mit Farben. OpenSCAD schreibt die Farben mit
+// Alpha 00, der Loader würde das Modell dann unsichtbar machen – daher werden
+// die Materialien deckend neu angelegt (Farbe bleibt erhalten).
+function solidMaterial(src) {
+  return new THREE.MeshStandardMaterial({
+    color: src && src.color ? src.color : 0xcfcfcf,
+    roughness: 0.55,
+    metalness: 0.08,
+    side: THREE.DoubleSide,
+  });
+}
+
+window._loadModelIntoViewer = function(buffer, opts) {
   const isBox = !!(opts && opts.box);
-  currentBuffer = buffer;
-  const geometry = loader.parse(buffer);
+  const group = loader.parse(buffer);
 
   if (mesh) {
     hadMesh = true;
     scene.remove(mesh);
-    mesh.geometry.dispose();
-    mesh.material.dispose();
-    scene.remove(edges);
-    edges.geometry.dispose();
-    edges.material.dispose();
+    disposeModel(mesh);
   }
 
-  mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-    color: 0xcfcfcf,
-    roughness: 0.55,
-    metalness: 0.08,
-    side: THREE.DoubleSide,
-  }));
-  // STL liegt jetzt dachunten (Druckorientierung) – Mesh gegengleich kippen,
+  group.traverse(o => {
+    if (!o.isMesh) return;
+    o.material = Array.isArray(o.material) ? o.material.map(solidMaterial) : solidMaterial(o.material);
+    // Kanten für klare Formtrennung
+    o.add(new THREE.LineSegments(
+      new THREE.EdgesGeometry(o.geometry, 20),
+      new THREE.LineBasicMaterial({ color: 0x000000 }),
+    ));
+  });
+  mesh = group;
+  // Das Modell liegt dachunten (Druckorientierung) – gegengleich kippen,
   // damit die Ansicht wie zuvor (Dach oben) erhalten bleibt.
   mesh.rotation.x = Math.PI / 2;
   scene.add(mesh);
-
-  // Kanten für klare Formtrennung
-  edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry, 20),
-    new THREE.LineBasicMaterial({ color: 0x000000 }),
-  );
-  edges.rotation.x = Math.PI / 2;
-  scene.add(edges);
 
   const box = new THREE.Box3().setFromObject(mesh);
   const center = box.getCenter(new THREE.Vector3());
@@ -550,8 +627,6 @@ window._loadStlIntoViewer = function(buffer, opts) {
   document.getElementById('btn-3mf').disabled = false;
   document.getElementById('overlay').style.display = 'none';
 };
-
-window._getCurrentBuffer = () => currentBuffer;
 
 // ── Messfunktion: zwei Punkte am Modell anklicken → Distanz in mm ──────────────
 // (Zustandsvariablen sind oben, vor der Render-Loop, deklariert.)
@@ -1048,6 +1123,65 @@ function updateHelp() {
 document.getElementById('csv').addEventListener('input', updateHelp);
 updateHelp();
 
+// Textauswahl (Links): markiert die aktive Option und ruft bei Klick/Enter onPick(wert) auf.
+function initChoice(id, onPick) {
+  const box = document.getElementById(id);
+  const mark = v => box.querySelectorAll('a').forEach(a => a.classList.toggle('sel', a.dataset.v === v));
+  box.mark = mark;
+  box.querySelectorAll('a').forEach(a => {
+    const pick = () => { mark(a.dataset.v); onPick(a.dataset.v); };
+    a.addEventListener('click', pick);
+    a.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+  return mark;
+}
+
+// Trenner: verschiebt die Höhe des Hilfebereichs (Textfeld füllt den Rest).
+(() => {
+  const bar = document.getElementById('splitter');
+  const help = document.querySelector('.help-scroll');
+  const setH = px => {
+    const max = bar.parentElement.clientHeight - 200;
+    help.style.flexBasis = Math.max(80, Math.min(px, max)) + 'px';
+  };
+  bar.addEventListener('pointerdown', e => {
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add('drag');
+    const y0 = e.clientY, h0 = help.offsetHeight;
+    const move = ev => setH(h0 + (y0 - ev.clientY));
+    const up = () => {
+      bar.classList.remove('drag');
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  });
+  bar.addEventListener('keydown', e => {
+    const d = { ArrowUp: 20, ArrowDown: -20 }[e.key];
+    if (d) { e.preventDefault(); setH(help.offsetHeight + d); }
+  });
+})();
+
+// Hilfemodus: Standard (nur Basisangaben) oder erweitert; Auswahl wird gemerkt.
+function setHelpMode(adv) {
+  document.body.classList.toggle('help-basic', !adv);
+  document.getElementById('help-choice').mark(adv ? '1' : '0');
+  try { localStorage.setItem('helpAdvanced', adv ? '1' : '0'); } catch (e) {}
+}
+initChoice('help-choice', v => setHelpMode(v === '1'));
+try { setHelpMode(localStorage.getItem('helpAdvanced') === '1'); } catch (e) { setHelpMode(false); }
+
+// Exportformat: Wert im versteckten Feld, geänderte Wahl macht den STL-Download ungültig.
+initChoice('export-choice', v => {
+  document.getElementById('export-format').value = v;
+  document.getElementById('btn-save').disabled = true;
+});
+document.getElementById('export-choice').mark('kompakt');
+
+
 // Beim Einfügen: Tabulatoren → Komma konvertieren (z. B. aus Tabellen) und
 // anschließend automatisch die Vorschau starten.
 document.getElementById('csv').addEventListener('paste', function(e) {
@@ -1071,13 +1205,13 @@ async function loadPreview() {
     const resp = await fetch('/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csv }),
+      body: new URLSearchParams({ csv, export: document.getElementById('export-format').value }),
     });
     if (!resp.ok) {
       showError(await resp.text());
       document.getElementById('overlay').style.display = 'none';
     } else {
-      window._loadStlIntoViewer(await resp.arrayBuffer(), { box: isBoxMode(csv) });
+      window._loadModelIntoViewer(await resp.arrayBuffer(), { box: isBoxMode(csv) });
     }
   } catch (e) {
     showError('Verbindungsfehler: ' + e.message);
@@ -1099,48 +1233,54 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   e.target.value = '';
 });
 
+// Dateiname für Downloads: Hausname aus dem Abschnitt "text" (sonst
+// "MLL Hausmaske"), bei gesetztem Stockwerk ergänzt um " G<n>".
+function downloadBaseName() {
+  const lines = document.getElementById('csv').value.split('\n').map(l => l.trim());
+  const ti = lines.findIndex(l => l.toLowerCase() === 'text');
+  let name = '';
+  if (ti >= 0) name = (lines.slice(ti + 1).find(l => l) || '').split(',')[0].trim();
+  // Folgt statt eines Namens ein weiterer Abschnitt, gilt der Standardname nicht als Hausname.
+  if (/^(raum|wand|vorne|hinten|links|rechts|licht|dach|druck|box|oben)$/i.test(name)) name = '';
+  const floor = lines.find(l => /^G\d$/i.test(l));
+  name = (name || 'MLL Hausmaske').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_');
+  return floor ? `${name} ${floor.toUpperCase()}` : name;
+}
+
 function saveCsvFile() {
   const text = document.getElementById('csv').value;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  a.download = 'hausmaske.csv';
+  a.download = downloadBaseName() + '.csv';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-function saveStl() {
-  const buf = window._getCurrentBuffer && window._getCurrentBuffer();
-  if (!buf) return;
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
-  a.download = 'house_mask.stl';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
+// STL und 3MF werden vom Server jeweils frisch aus der aktuellen Definition
+// gerendert (die Vorschau liegt nur als farbiges 3MF im Viewer).
+function saveStl() { return serverDownload('btn-save', '/export', 'stl'); }
+function save3mf() { return serverDownload('btn-3mf', '/export3mf', '3mf'); }
 
-// 3MF kann nicht aus dem STL-Puffer erzeugt werden – der Server rendert die
-// aktuelle Definition erneut nach 3MF.
-async function save3mf() {
+async function serverDownload(btnId, path, ext) {
   const csv = document.getElementById('csv').value.trim();
   if (!csv) return;
-  const btn = document.getElementById('btn-3mf');
+  const btn = document.getElementById(btnId);
   const label = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '… 3MF';
+  btn.textContent = '… ' + ext.toUpperCase();
   document.getElementById('error-box').innerHTML = '';
   try {
-    const resp = await fetch('/export3mf', {
+    const resp = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csv }),
+      body: new URLSearchParams({ csv, export: document.getElementById('export-format').value }),
     });
     if (!resp.ok) {
       showError(await resp.text());
     } else {
-      const blob = await resp.blob();
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'house_mask.3mf';
+      a.href = URL.createObjectURL(await resp.blob());
+      a.download = `${downloadBaseName()}.${ext}`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }

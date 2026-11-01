@@ -369,14 +369,13 @@ dach
 
 ## Optional – Druckparameter (`druck`)
 
-Feineinstellung der Wandstärken. Jede Zeile: `Schlüssel, Wert`.
+Feineinstellung der Wandstärken (alle Angaben in mm). Jede Zeile: `Schlüssel, Wert`.
 
-| Schlüssel | Bedeutung | Standard |
-|-----------|-----------|----------|
-| `wand` | allgemeine Wandstärke | 0.8 mm |
-| `aussen` | Stärke der Außenwände | wie `wand` |
-| `innen` | Stärke der Innenwände | wie `wand` |
-| `dach` | Stärke der Dachfläche | 1.0 mm |
+| Schlüssel | Bedeutung | Standard | Minimum |
+|-----------|-----------|----------|---------|
+| `aussen` | Stärke der Außenwände | 1.2 mm | 0.8 mm |
+| `innen` | Stärke der Innenwände | 1.0 mm | 0.8 mm |
+| `dach` | Stärke der Dachfläche | 1.2 mm | 1.2 mm (`licht_h`) |
 
 ```
 druck

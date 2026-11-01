@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY server.py house_mask.scad lightbox.scad index.html ./
 COPY data/ ./data/
+COPY static/ ./static/
 
 EXPOSE 8080
 

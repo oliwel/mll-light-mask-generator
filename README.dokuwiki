@@ -5,7 +5,8 @@ eingesetzt, trennt die Räume lichtdicht voneinander und nimmt die Hausplatine a
 
 {{bilder:3d_druck:3dhaeuser:screenshot_maskengenerator.png|Screenshot des Generators}}
 
-{{:bilder:3d_druck:3dhaeuser:img_20260604_222711948.jpg?400 |}}{{:bilder:3d_druck:3dhaeuser:img_20260610_091018941.jpg?400}}
+{{:bilder:3d_druck:3dhaeuser:img_20260604_222711948.jpg?400 |}}{{:bilder:3d_druck:3dhaeuser:img_20260610_091018941.jpg?400|}}
+{{:bilder:3d_druck:3dhaeuser:masken_gestapelt_zweiteilig.png?400}}
 
 Diese Anleitung beschreibt **Schritt für Schritt, wie eine Konfiguration aufgebaut wird**.
 
@@ -341,10 +342,9 @@ dach
 Feineinstellung der Wandstärken. Jede Zeile: ''Schlüssel, Wert''.
 
 ^ Schlüssel ^ Bedeutung ^ Standard ^
-| wand | allgemeine Wandstärke | 0.8 mm |
-| aussen | Stärke der Außenwände | wie ''wand'' |
-| innen | Stärke der Innenwände | wie ''wand'' |
-| dach | Stärke der Dachfläche | 1.0 mm |
+| aussen | Stärke der Außenwände | 1.2 mm (Minimum 0.8 mm) |
+| innen | Stärke der Innenwände | 1.0 mm (Minimum 0.8 mm) |
+| dach | Stärke der Dachfläche | 1.2 mm (Minimum 1.2 mm, licht_h) |
 
 <code>
 druck

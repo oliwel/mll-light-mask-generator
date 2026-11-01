@@ -1,0 +1,1 @@
+three.js r184 (MIT), unverändert von https://cdn.jsdelivr.net/npm/three@0.184.0/ übernommen: build/three.module.js, build/three.core.js, examples/jsm/{controls/OrbitControls.js,loaders/3MFLoader.js,libs/fflate.module.js}

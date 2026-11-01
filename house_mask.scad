@@ -121,22 +121,35 @@ module idc_socket_body(idc_mode, wall = tunnel_wall) {
             cube([body_w, tunnel_d + 2*wall, base_z]);
 
         // Fase als Stützstruktur über der Grundplatte, aufgespannt zwischen den
-        // Tunnel-Längswänden bei y = ±ramp. Beim Druck liegt die Dachfläche
-        // unten, +z zeigt also nach unten: die Grundplatte wäre sonst eine frei
-        // hängende Fläche. Beide Hälften setzen an den Wänden an und wachsen
-        // unter 45° bis zur Mitte zusammen, sodass jede Schicht nur um eine
-        // Schichthöhe auskragt. Die Fase läuft über die gesamte Tunnelbreite.
-        for (s = [-1, 1])
-            rotate([90, 0, 90])
-                linear_extrude(height = body_w)
-                    polygon([[-s * eps,  base_z],
-                             [s * ramp,  base_z],
-                             [s * ramp,  base_z + ramp]]);
+        // Tunnel-Längswänden bei y = ±ramp — nur beim kompakten (gemeinsamen)
+        // Druck nötig: dort liegt die Dachfläche unten, +z zeigt also nach
+        // unten, und die Grundplatte wäre sonst eine frei hängende Fläche.
+        // Beide Hälften setzen an den Wänden an und wachsen unter 45° bis zur
+        // Mitte zusammen, sodass jede Schicht nur um eine Schichthöhe
+        // auskragt. Beim getrennten Druck der Innenwände liegt stattdessen
+        // deren Unterseite (z=0) auf dem Druckbett (s. innen_unten()); die
+        // Grundplatte druckt sich von unten nach oben ohne Überhang und
+        // braucht die Fase nicht.
+        if (export == "kompakt")
+            for (s = [-1, 1])
+                rotate([90, 0, 90])
+                    linear_extrude(height = body_w)
+                        polygon([[-s * eps,  base_z],
+                                 [s * ramp,  base_z],
+                                 [s * ramp,  base_z + ramp]]);
     }
 }
 
 // Negativteil: Steckertasche, Kodiernase und Kontaktkammern. Die Führung
-// (IDC_STACK) hat keine Tasche, die Grundplatte liegt dort direkt am Tunnelboden.
+// (IDC_STACK) hat keine Tasche, die Grundplatte liegt dort direkt am
+// Tunnelboden — beim getrennten Druck der Innenwände (Unterseite z=0 auf dem
+// Druckbett, s. innen_unten()) liegt damit nur noch diese eine flache,
+// gelochte Fläche auf dem Druckbett auf.
+// Bei IDC_PLUG bleibt die Tasche unverändert nach z=0 offen: sie druckt sich
+// dadurch zwischen Druckbett und der (unveränderten) Grundplatten-Fläche als
+// Hohlraum, der das Druckbett als provisorischen Boden nutzt — nach dem Druck
+// liegt die Buchse mit Kodiernase offen zwischen Druckbett-Seite und Fläche,
+// genau wie beim kompakten Druck.
 module idc_socket_cavity(tunnel_h, idc_mode, wall = tunnel_wall) {
     pocket_z = idc_base_z(idc_mode) - idc_base; // Taschendecke = Unterseite Grundplatte
 
@@ -173,6 +186,60 @@ wall_back_inner  = room_depth  - po_ba - aussenwand;
 wall_left_inner  = po_le + aussenwand;
 wall_right_inner = room_width  - po_ri - aussenwand;
 
+// Eine Außenwand ohne Fenster/Türen wird nicht gedruckt (s. model_aussen()).
+// Dort fehlt dann auch das Nut/Feder-Gegenstück: der Schnittquader in
+// innen_koerper() lässt die Innenwände auf dieser Seite seitenweise bis zur
+// Dachkante durchlaufen, statt sie wie an einer echten Außenwand um "inset"
+// einzuziehen.
+hat_wand_vorne  = len(front_windows) > 0;
+hat_wand_hinten = len(back_windows)  > 0;
+hat_wand_links  = len(left_windows)  > 0;
+hat_wand_rechts = len(right_windows) > 0;
+
+// ── Druckmodus / Dachstärke ───────────────────────────────────────────────────
+// "export" wählt die Ausgabe (s. "Farbgruppen / Maske" unten). Nur bei "kompakt"
+// (beide Körper ineinander, ein Druckteil) bleibt die Dachstärke frei vom
+// Nutzer wählbar. Bei getrenntem Druck (beide/aussen/innen) ist das Dach immer
+// licht_h dünn: die Innenwände enden dort ohnehin bündig unter dem Dach (siehe
+// innen_koerper()-Aufrufe unten) und werden stattdessen von Führungsschienen
+// seitlich geführt (dach_schienen()), nicht von einem Zapfen im Dach selbst.
+// (dachwand_eff statt einer Neuzuweisung von dachwand: eine Top-Level-Variable
+// in OpenSCAD lässt sich nicht unter Bezug auf ihren eigenen vorherigen Wert
+// neu zuweisen — das letzte "=" im Datei gilt überall, auch auf der eigenen
+// rechten Seite, was einen Zirkelbezug (undef) ergäbe.)
+// Default; per Aufruf mit -D 'export="..."' überschreibbar.
+export       = "kompakt";
+dachwand_eff = export == "kompakt" ? dachwand : licht_h;
+
+// ── Nut/Feder zwischen Außenhülle und Innenkörper ─────────────────────────────
+// Ermöglicht getrennten Druck von Außen- (aussen) und Innen-Teil (innen):
+// Alle Innenwände und der Tunnel werden bis zur Außenkante des Körpers (bzw.
+// bis room_height) gebaut und anschließend mit einem Quader geschnitten, der an
+// allen Seiten außer dem Boden um "inset" kleiner ist als der Körper
+// (innen_koerper()).
+//   - inset = wand_nut_min_rest, Wandquerschnitt um wand_nut_spiel aufgeweitet:
+//     wird von der Außenhülle abgezogen → Nuten, an jeder Nut bleiben genau
+//     wand_nut_min_rest zur sichtbaren Außenfläche stehen, quer mit Spiel.
+//   - inset = wand_nut_min_rest + Längsspiel, normale Wandstärke:
+//     Druckteil innen → Zapfen mit Spiel an der Spitze.
+// Außenwand muss deshalb mindestens wand_nut_min_rest dick sein (Prüfung in
+// server.py). Das Dach bekommt keinen Zapfen mehr (dazu ist es bei getrenntem
+// Druck mit licht_h zu dünn) — beide Innenkörper-Varianten enden dort bündig
+// an der Dachunterseite, s. model_aussen()/model_innen().
+wand_nut_min_rest = 0.8;  // bleibt an jeder Nut zur sichtbaren Außenfläche stehen [mm]
+wand_nut_spiel    = 0.1;  // Spiel je Seite zwischen Zapfen und Nut (analog ecke_spiel)
+// Längsspiel an der Zapfenspitze nur ab dieser Wandstärke: darunter ist die Nut
+// so flach (< 0.2mm), dass das Spiel den Zapfen aufzehren und einen Spalt zur
+// Wand lassen würde — dann wird ohne Längsspiel gedruckt (Zapfen füllt die Nut
+// in der Tiefe voll aus, Querspiel bleibt).
+wand_nut_spiel_ab = 1.0;
+wand_spiel_laengs = aussenwand < wand_nut_spiel_ab ? 0 : wand_nut_spiel;
+
+// Aufweitung des Wandquerschnitts um grow je Seite, symmetrisch um dieselbe
+// Mittelachse: grow_off() = Versatz für translate(), grow_span() = Kantenlänge.
+function grow_off(t, grow)  = -t/2 - grow;
+function grow_span(t, grow) = t + 2*grow;
+
 // ── Lichtöffnung ──────────────────────────────────────────────────────────────
 // licht = [[cx, cy, rotation, slot_mode, idc], ...]
 // cx/cy = Mittelpunkt des Ausschnitts, absolute SCAD-Koordinaten vom Körperursprung (0,0).
@@ -188,6 +255,14 @@ function licht_nearest(px, py, i = 1, best = 0) =
                   licht_dist2(i, px, py) < licht_dist2(best, px, py) ? i : best);
 // Mittelpunkt des zuständigen Ausschnitts; ohne licht-Eintrag der Ursprung.
 function licht_ref(px, py) = len(licht) > 0 ? licht[licht_nearest(px, py)] : [0, 0];
+
+// Voller Ausschnitt-Fußabdruck (licht_w × licht_d) an der Lichtposition l,
+// Dicke h ab Höhe z0 — gemeinsame Geometrie für Dachausschnitt, Randrahmen-
+// Innenkante und die Vertiefung im Innenkörper (innen_koerper()).
+module licht_hole(l, z0, h) {
+    translate([l[0] - licht_w/2, l[1] - licht_d/2, z0])
+        cube([licht_w, licht_d, h]);
+}
 
 module licht_transform(l) {
     cx = l[0];
@@ -211,14 +286,21 @@ module licht_transform(l) {
 //   length          = Referenzlänge der Wand (volle Raumkante)
 //   inset_l/inset_r = Druckversatz an linker/rechter Wandkante (Panel-Verkürzung)
 //   windows         = [[x_von_links, y_ab_boden, breite, hoehe], ...]
-module wall_with_windows(length, inset_l, inset_r, windows) {
-    difference() {
+//   height          = Wandhöhe (Default room_height)
+//   thickness       = Wanddicke in Y-Richtung (Default aussenwand für
+//                     Außenwände; named_wall() übergibt hier innenwand, s.u.).
+module wall_with_windows(length, inset_l, inset_r, windows, height = room_height, thickness = aussenwand) {
+    if (len(windows) == 0) {
         translate([inset_l, 0, 0])
-            color([0,0,0.5])
-                cube([length - inset_l - inset_r, aussenwand, room_height]);
-        for (w = windows)
-            translate([w[0], -0.1, w[1]])
-                cube([w[2], aussenwand + 0.2, w[3]]);
+            cube([length - inset_l - inset_r, thickness, height]);
+    } else {
+        difference() {
+            translate([inset_l, 0, 0])
+                cube([length - inset_l - inset_r, thickness, height]);
+            for (w = windows)
+                translate([w[0], -0.1, w[1]])
+                    cube([w[2], thickness + 0.2, w[3]]);
+        }
     }
 }
 
@@ -227,62 +309,93 @@ module wall_with_windows(length, inset_l, inset_r, windows) {
 // Aufbau: Vorder-/Hinterwand (15mm in X), center_fins (bei cx in Y),
 // Würfel 5×5×5mm außen links und rechts (ab Innenmass).
 
-module tunnel(l) {
+// Alle Teile laufen bis room_height; die Vertiefung im Dachausschnitt
+// (licht_h) und der Schnitt gegen das Dach entstehen erst in innen_koerper().
+// grow (>0) weitet nur die beiden Kreuzwände in der Dicke auf (Querspiel für
+// den Nut-Schnitt). Standfuß, Tunnelbohrung und IDC-Buchse liegen vollständig
+// im Dachausschnitt, berühren die Außenhülle also nie — für grow>0 werden sie
+// weggelassen (spart CGAL-Arbeit, gleiches Ergebnis).
+module tunnel(l, grow = 0) {
     cx  = l[0];   cy  = l[1];
-    lx  = cx - licht_w / 2;
-    ly  = cy - licht_d / 2;
     tw  = tunnel_w / 2;
     td  = tunnel_d / 2;
     tw_g = tunnel_w + 2* tunnel_wall;
     td_g = tunnel_d + 2* tunnel_wall;
-    // 1mm Abstand für Platinenauflage
+    // Unterkante Platine (Einstecktiefe licht_h unter Dachoberkante)
     h   = room_height - licht_h;
     // Anschlussart aus der Datenzeile: "idc" → IDC_PLUG, "stack" → IDC_STACK
     idc = is_undef(l[4]) ? IDC_NONE : l[4];
     ext = idc_mode_ext(idc);   // Verbreiterung der rechten Wand für die Buchse
 
-    difference() {
-        union() {
-            difference() {
-                union() {
-                    // Standfuss - solider Würfel bildet Pfeiler + X-Wände
-                    translate([cx - tw_g/2, cy - td_g/2, 0])
-                        cube([tw_g + ext, td_g, h]);
+    // Kreuzwände: reichen je Seite innenwand über licht_w/licht_d hinaus in den
+    // Randrahmen-Streifen; Dicke und Stirnseiten wachsen um grow.
+    module kreuzwaende() {
+        translate([cx + grow_off(licht_w, innenwand + grow), cy + grow_off(innenwand, grow), 0])
+            cube([grow_span(licht_w, innenwand + grow), grow_span(innenwand, grow), room_height]);
+        translate([cx + grow_off(innenwand, grow), cy + grow_off(licht_d, innenwand + grow), 0])
+            cube([grow_span(innenwand, grow), grow_span(licht_d, innenwand + grow), room_height]);
+    }
 
-                    // Kreuzwand in Y-Richtung
-                    translate([lx - innenwand , cy - innenwand/2, 0])
-                        cube([ licht_w + 2 * innenwand, innenwand, h]);
+    if (grow > 0) {
+        difference() {
+            kreuzwaende();
+            translate([cx - tw, cy - td, -0.1])
+                cube([tunnel_w, tunnel_d, room_height + 0.2]);
+        }
+    } else {
+        difference() {
+            union() {
+                difference() {
+                    union() {
+                        // Standfuss - solider Würfel bildet Pfeiler + X-Wände
+                        translate([cx - tw_g/2, cy - td_g/2, 0])
+                            cube([tw_g + ext, td_g, room_height]);
+                        kreuzwaende();
+                    }
 
-                    // Kreuzwand in X-Richtung
-                    translate([cx - innenwand/2, ly - innenwand, 0])
-                        cube([innenwand, licht_d + 2* innenwand, h]);
-
-                    // Ausrichtungshilfe
-                    translate([lx + licht_w, ly + 21.4, h])
-                        cylinder( h = licht_h, d = 6.8, $fn=32 );
-
-                    // Halterung Schalter (Ausschnitt erfolgt später)
-                    translate([cx - 3, ly - 4, room_height - 3 ])
-                        cube([ 6, 4, 3.0]);
+                    translate([cx - tw, cy - td, -0.1])
+                        cube([tunnel_w, tunnel_d, room_height + 0.2]);
 
                 }
 
-                translate([cx - tw, cy - td, -0.1])
-                    cube([tunnel_w, tunnel_d, h + 0.2]);
-
+                // Sockel der IDC-Buchse füllt die Tunnelbohrung von unten auf
+                if (idc != IDC_NONE)
+                    translate([cx, cy, 0])
+                        idc_socket_body(idc);
             }
 
-            // Sockel der IDC-Buchse füllt die Tunnelbohrung von unten auf
+            // Tasche der IDC-Buchse; greift bis in die verbreiterte rechte Wand
             if (idc != IDC_NONE)
                 translate([cx, cy, 0])
-                    idc_socket_body(idc);
+                    idc_socket_cavity(h, idc);
         }
-
-        // Tasche der IDC-Buchse; greift bis in die verbreiterte rechte Wand
-        if (idc != IDC_NONE)
-            translate([cx, cy, 0])
-                idc_socket_cavity(h, idc);
     }
+}
+
+// Ausrichtungshilfe (Zentrierzapfen für die Platine) und Schalterhalterung:
+// beide sitzen im Randrahmen-/Dachbereich (voll im Z-Bereich des Randrahmens
+// enthalten) und gehören daher zur Außen-/Dachgruppe, nicht zum Tunnel.
+// X/Y-Fußabdruck der Schalterhalterung (Z wird vom Aufrufer bestimmt) — von
+// dach_feature() und dach_schienen() gemeinsam genutzt, damit beide Stellen
+// immer dieselbe Lage/Größe verwenden.
+module schalter_footprint(l, z0, h) {
+    cx = l[0]; cy = l[1];
+    ly = cy - licht_d / 2;
+    translate([cx - 3, ly - 4, z0]) cube([6, 4, h]);
+}
+
+module dach_feature(l) {
+    cx = l[0]; cy = l[1];
+    lx = cx - licht_w / 2;
+    ly = cy - licht_d / 2;
+    h  = room_height - licht_h;
+
+    // Ausrichtungshilfe
+    translate([lx + licht_w, ly + 21.4, h])
+        cylinder(h = licht_h, d = 6.8, $fn = 32);
+
+    // Halterung Schalter (Ausschnitt erfolgt später via mode_switch())
+    schalter_footprint(l, room_height - 3, 3.0);
 }
 
 // ── Stapelecken ───────────────────────────────────────────────────────────────
@@ -292,10 +405,10 @@ module tunnel(l) {
 // darunterliegenden Dachs und fixiert die Räume zueinander. Zapfen und
 // Aussparung liegen auf der Innenseite der Außenwände, damit die Außenkontur
 // der Maske unverändert bleibt und beim Einschieben nichts aufsetzt.
-ecke_kante = 2;     // Kantenlänge der quadratischen Ecken [mm]
+ecke_dreieck = 4;   // Kathetenlänge der Dreiecke in den Ecken [mm]
 ecke_r     = 3;     // Radius des Viertelkreises vorne links [mm]
 ecke_tief  = 2;     // Eingriffstiefe von Zapfen und Aussparung [mm]
-ecke_spiel = 0.15;  // Spiel je Seite zwischen Zapfen und Aussparung [mm]
+ecke_spiel = 0.25;  // Spiel je Seite zwischen Zapfen und Aussparung [mm]
 
 geschoss_nr = is_undef(geschoss) ? -1 : geschoss;
 
@@ -311,8 +424,8 @@ function ecke_pos(sx, sy) = [sx ? wall_right_inner : wall_left_inner,
 
 // Grundriss einer Stapelecke. Lokaler Ursprung = innere Wandecke, +X/+Y zeigen
 // nach innen; die Spiegelung im Aufrufer dreht den Grundriss in die jeweilige
-// Ecke. Vorne links ein Viertelkreis, sonst ein Quadrat – die abweichende Form
-// macht die Stapellage eindeutig, gestapelt passt nur eine Drehung.
+// Ecke. Drei Ecken sind rechtwinklige Dreiecke, vorne links ein Viertelkreis;
+// die abweichende Form macht die Stapellage eindeutig, gestapelt passt nur eine Drehung.
 //   spiel = Untermaß je Seite (Zapfen); die beiden Kanten an den Wänden bleiben
 //           bündig, das Spiel liegt auf der Innenseite.
 module ecke_profil(sx, sy, spiel = 0) {
@@ -321,8 +434,11 @@ module ecke_profil(sx, sy, spiel = 0) {
             circle(r = ecke_r - spiel, $fn = 64);
             square(ecke_r);
         }
-    else
-        square(ecke_kante - spiel);
+    else {
+        // Hypotenuse um spiel nach innen versetzt, Katheten bleiben wandbündig
+        l = ecke_dreieck - spiel * sqrt(2);
+        polygon([[0, 0], [l, 0], [0, l]]);
+    }
 }
 
 // Aussparung: von der Dachunterseite ecke_tief nach oben durch das Dach.
@@ -364,23 +480,23 @@ module ecken_pin() {
 
 module licht_border(l) {
     lx = l[0] - licht_w / 2; ly = l[1] - licht_d / 2;
-    translate([lx - innenwand, ly - innenwand, room_height - 3])
-        difference() {
+    difference() {
+        translate([lx - innenwand, ly - innenwand, room_height - 3])
             cube([licht_w + 2*innenwand, licht_d + 2*innenwand, 3]);
-            translate([innenwand, innenwand, - 0.1])
-                cube([licht_w, licht_d, 3 + 0.2]);
-        }
+        licht_hole(l, room_height - 3 - 0.1, 3 + 0.2);
+    }
 }
 
 // ── Kabelschlitz ──────────────────────────────────────────────────────────────
 // 5mm breit, innenwand tief, schneidet alle Elemente an der Vorderkante des Ausschnitts.
 // Z: 2mm unter Rahmenboden bis durch die Decke (globale difference).
+// z0 = Sohle des Schlitzes; innen_koerper() legt sie auf die Tiefe der
+// Schalterhalterungs-Lücke, damit die Kerbe in der Innenwand eben bleibt.
 
-module mode_switch(l) {
+module mode_switch(l, z0 = room_height - 2.5) {
     cx   = l[0];
     ly   = l[1] - licht_d / 2;
     mode = l[3];  // 0 = Quader, 1 = weiter (rechts Keil), 2 = ende (links Keil)
-    z0   = room_height - 2.5;
     // Wandbereich hinter Ausschnitt immer öffnen
     translate([cx - 2, ly, z0])
         cube([4, 3, 3]);
@@ -403,43 +519,57 @@ module mode_switch(l) {
     }
 }
 
-// ── Freie Innenwände (Polygonzug) ─────────────────────────────────────────────
-// poly_walls = [[[x1,y1],[x2,y2],...], ...]
+// ── Freie Innenwände (Polygonzug/benannt) ─────────────────────────────────────
+// poly_walls    = [[[x1,y1],[x2,y2],...], ...]
+// named_walls   = [[[x1,y1],[x2,y2],[[x,z0,b,h],...]], ...]
+//
+// Ein Wandende, das an einer Außenwand enden soll, wird bis auf/über deren
+// Außenfläche gezeichnet; der Schnittquader in innen_koerper() kappt es
+// automatisch und bildet dort den Zapfen.
 
-module wall_seg(p1, p2) {
+// Freistehende gerade Wand p1→p2 mit optionalen Fensteröffnungen (Dicke
+// innenwand, volle Höhe). poly_walls sind der Sonderfall ohne Fenster
+// (windows=[], siehe poly_walls_draw()). Fenster: [x, z0, breite, hoehe] –
+// x = Distanz entlang der Wand ab p1, z0 = Höhe ab Boden; wie bei den
+// Außenwänden vorne/hinten. grow weitet die Wandstärke auf (Querspiel).
+module named_wall(p1, p2, windows = [], grow = 0) {
     dx = p2[0] - p1[0];
     dy = p2[1] - p1[1];
     len = sqrt(dx*dx + dy*dy);
     translate([p1[0], p1[1], 0])
         rotate([0, 0, atan2(dy, dx)])
-            translate([0, -innenwand/2, 0])
-                cube([len, innenwand, room_height]);
+            translate([0, grow_off(innenwand, grow), 0])
+                wall_with_windows(len, 0, 0, windows, room_height, grow_span(innenwand, grow));
 }
 
-module poly_walls_draw(polys) {
-    for (poly = polys)
+// Verbindungsstück an einem Zwischenpunkt eines Polygonzugs: ein um 45°
+// gedrehter Würfel, dessen Ecken auf den Achsen bei ±Wandstärke/2 liegen –
+// bei einer rechtwinkligen Ecke treffen sie damit genau auf die Stoßkante der
+// beiden Wandenden (deren Querschnitt dort ebenfalls bis ±Wandstärke/2
+// reicht), die Kanten des Würfels fallen also mit denen der Wände zusammen,
+// statt sie zu über- oder unterschreiten. Kantenlänge = Wandstärke/sqrt(2)
+// (Abstand Mittelpunkt–Ecke = Kantenlänge/sqrt(2) = Wandstärke/2).
+module poly_wall_joint(p, grow = 0) {
+    side = grow_span(innenwand, grow) / sqrt(2);
+    translate([p[0], p[1], 0])
+        rotate([0, 0, 45])
+            translate([-side/2, -side/2, 0])
+                cube([side, side, room_height]);
+}
+
+module poly_walls_draw(polys, grow = 0) {
+    for (poly = polys) {
         for (i = [0 : len(poly) - 2])
-            wall_seg(poly[i], poly[i+1]);
+            named_wall(poly[i], poly[i+1], [], grow);
+        if (len(poly) > 2)
+            for (i = [1 : len(poly) - 2])
+                poly_wall_joint(poly[i], grow);
+    }
 }
 
-// ── Benannte Fensterwände ───────────────────────────────────────────────────────
-// Freistehende gerade Wand p1→p2 (Dicke innenwand, volle Höhe) mit Fenstern.
-// Fenster: [x, z0, breite, hoehe] – x = Distanz entlang der Wand ab p1,
-// z0 = Höhe ab Boden; wie bei den Außenwänden vorne/hinten.
-// named_walls = [[[x1,y1],[x2,y2],[[x,z0,b,h],...]], ...]
-module named_wall(p1, p2, windows) {
-    dx = p2[0] - p1[0];
-    dy = p2[1] - p1[1];
-    len = sqrt(dx*dx + dy*dy);
-    translate([p1[0], p1[1], 0])
-        rotate([0, 0, atan2(dy, dx)])
-            translate([0, -innenwand/2, 0])
-                wall_with_windows(len, 0, 0, windows);
-}
-
-module named_walls_draw(walls) {
+module named_walls_draw(walls, grow = 0) {
     for (nw = walls)
-        named_wall(nw[0], nw[1], nw[2]);
+        named_wall(nw[0], nw[1], nw[2], grow);
 }
 
 // ── Innenwände ────────────────────────────────────────────────────────────────
@@ -453,18 +583,22 @@ module named_walls_draw(walls) {
 //   Z = Höhe
 //   v_edge = Y-Abstand Innenfläche → naher Rand des Dachausschnitts (Auto-Modus)
 //   u_c    = Position der Lichtmitte entlang X (Auto-Querelement)
-module inner_wall(p, len, v_edge, u_c) {
+// grow weitet die Wandstärke auf (Querspiel, siehe innen_koerper()).
+// Die Hauptwand beginnt an der Außenfläche der Außenwand (y = -aussenwand) und
+// läuft bis room_height; Zapfen und Dachanschluss schneidet innen_koerper().
+module inner_wall(p, len, v_edge, u_c, grow = 0) {
     if (len != -1) {
-        translate([p - innenwand/2, 0, 0])
-            cube([innenwand, len, room_height]);
+        translate([p + grow_off(innenwand, grow), -aussenwand, 0])
+            cube([grow_span(innenwand, grow), len + aussenwand, room_height]);
     } else {
-        // Hauptwand: von der Innenfläche (v=0, bündig/verschmelzend) bis zum
-        // Randrahmen. Kein Überstand in die Außenwand → ragt nie in ein Fenster.
-        translate([p - innenwand/2, 0, 0])
-            cube([innenwand, v_edge, room_height]);
-        // Querelement im Randrahmen-Streifen von p bis zur Lichtmitte
-        translate([min(p, u_c) - innenwand/2, v_edge - innenwand, 0])
-            cube([abs(p - u_c) + innenwand, innenwand, room_height]);
+        // Hauptwand: von der Außenwand bis zum Randrahmen.
+        translate([p + grow_off(innenwand, grow), -aussenwand, 0])
+            cube([grow_span(innenwand, grow), v_edge + aussenwand, room_height]);
+        // Querelement im Randrahmen-Streifen von p bis zur Lichtmitte (an
+        // min(p,u_c) verankert statt zentriert, deshalb hier nicht über
+        // grow_off()/grow_span() ausgedrückt).
+        translate([min(p, u_c) - innenwand/2 - grow, v_edge - innenwand - grow, 0])
+            cube([abs(p - u_c) + innenwand + 2*grow, innenwand + 2*grow, room_height]);
     }
 }
 
@@ -473,121 +607,266 @@ module inner_wall(p, len, v_edge, u_c) {
 // serverseitig bereits passend (invertiert) geliefert.
 // Der Ansatzpunkt einer Wand liegt auf der Innenfläche ihrer Außenwand bei der
 // Position w[0]; er bestimmt, welcher Ausschnitt angefahren wird.
-module inner_walls_place(face, walls) {
+module inner_walls_place(face, walls, grow = 0) {
     if (face == 0)          // vorne: keine Drehung, nach innen = +Y
         translate([0, wall_front_inner, 0])
             for (w = walls) {
                 ref = licht_ref(w[0], wall_front_inner);
                 inner_wall(w[0], w[1],
-                           ref[1] - licht_d/2 - wall_front_inner, ref[0]);
+                           ref[1] - licht_d/2 - wall_front_inner, ref[0], grow);
             }
     else if (face == 1)     // hinten: an Y gespiegelt
         translate([0, wall_back_inner, 0]) mirror([0, 1, 0])
             for (w = walls) {
                 ref = licht_ref(w[0], wall_back_inner);
                 inner_wall(w[0], w[1],
-                           wall_back_inner - (ref[1] + licht_d/2), ref[0]);
+                           wall_back_inner - (ref[1] + licht_d/2), ref[0], grow);
             }
     else if (face == 2)     // links: X↔Y getauscht (Spiegelung)
         translate([wall_left_inner, 0, 0]) mirror([1, 0, 0]) rotate([0, 0, 90])
             for (w = walls) {
                 ref = licht_ref(wall_left_inner, w[0]);
                 inner_wall(w[0], w[1],
-                           ref[0] - licht_w/2 - wall_left_inner, ref[1]);
+                           ref[0] - licht_w/2 - wall_left_inner, ref[1], grow);
             }
     else if (face == 3)     // rechts: 90°-Drehung
         translate([wall_right_inner, 0, 0]) rotate([0, 0, 90])
             for (w = walls) {
                 ref = licht_ref(wall_right_inner, w[0]);
                 inner_wall(w[0], w[1],
-                           wall_right_inner - (ref[0] + licht_w/2), ref[1]);
+                           wall_right_inner - (ref[0] + licht_w/2), ref[1], grow);
             }
+}
+
+// ── Farbgruppen / Maske ───────────────────────────────────────────────────────
+// Zwei Modelle für den Multi-Material-/Mehrteil-Druck:
+//   model_aussen() = Außenwände + Dach + Randrahmen + Stapelzapfen + Gravur
+//   model_innen()  = Innenwände + Tunnel-Struktur (Platinenhalter)
+// Beide entstehen aus demselben Innenkörper (innen_koerper(), s.u.): die Hülle
+// zieht ihn mit Querspiel ab (→ Nuten), das Innenteil ist er selbst mit
+// zusätzlichem Spiel an den Zapfenspitzen.
+// Gesteuert über den OpenSCAD-Aufrufparameter, z.B. -D 'export="beide"':
+//   kompakt = beide Körper ineinander, als ein Gebäude (Multi-Material-Druck,
+//             Default, wenn "export" nicht gesetzt ist)
+//   beide   = beide Körper als getrennte Objekte nebeneinander (Einzeldruck),
+//             angeordnet entlang der längeren Raumkante
+//   aussen / innen = nur der jeweilige Körper
+// (export selbst steht weiter oben, da die Dachstärke schon davon abhängt.)
+maske_spalt = 5; // Abstand zwischen Hülle und Innenteil bei export="beide" [mm]
+
+// Alle Innenwände (ohne Tunnel), ungekappt bis zur Außenkante.
+module innen_walls_all(grow = 0) {
+    inner_walls_place(0, front_walls, grow);
+    inner_walls_place(1, back_walls,  grow);
+    inner_walls_place(2, left_walls,  grow);
+    inner_walls_place(3, right_walls, grow);
+    poly_walls_draw(poly_walls, grow);
+    named_walls_draw(is_undef(named_walls) ? [] : named_walls, grow);
+}
+
+// Führungsschienen unter dem Dach (ersetzen bei getrenntem Druck den Zapfen
+// ins Dach, das dafür mit licht_h zu dünn ist, s. "Druckmodus / Dachstärke"
+// oben): zwei dünne Rippen je Innenwand, von der Dachunterseite herabhängend,
+// zwischen denen die (bündig endende) Innenwand beim Zusammenbau seitlich
+// geführt wird. Entstehen wie die Nuten durch Aufwachsen/Abzug desselben
+// Wandmodells — äußere Kontur (Breite 3*innenwand) minus innere Kontur
+// (Breite innenwand + 2*wand_nut_spiel) ergibt eine Rippe parallel zu jeder
+// Wand. Am Dachausschnitt entfällt die Rippe (Fensteröffnung + Platz für die
+// Schalterhalterung), damit sie dort nicht hineinragt.
+dach_schiene_h = 2; // Höhe der Rippen unter der Dachunterseite [mm]
+
+module dach_schienen() {
+    z0 = room_height - dachwand_eff - dach_schiene_h;
+    difference() {
+        intersection() {
+            difference() {
+                innen_walls_all(grow = innenwand);       // Breite 3*innenwand
+                innen_walls_all(grow = wand_nut_spiel);  // Breite innenwand + 2*wand_nut_spiel
+            }
+            translate([-0.1, -0.1, z0])
+                cube([room_width + 0.2, room_depth + 0.2, dach_schiene_h + 0.1]);
+        }
+        for (l = licht)
+            licht_transform(l) {
+                licht_hole(l, z0 - 0.1, dach_schiene_h + 0.2);
+                schalter_footprint(l, z0 - 0.1, dach_schiene_h + 0.2);
+            }
+    }
+}
+
+// Innenkörper: Innenwände + Tunnel, mit einem Quader an allen Seiten außer dem
+// Boden auf "inset" beschnitten; danach die licht_h-Vertiefung im
+// Dachausschnitt und die Schalterkerbe (mode_switch).
+//   grow      = Aufweitung des Wandquerschnitts (Querspiel)
+//   inset     = Abstand des Schnittquaders zur Außenfläche der Außenwände
+//   inset_top = Abstand des Schnittquaders zur Dachoberseite (gilt nur für die
+//               Wände — der Tunnel sitzt unabhängig davon immer licht_h unter
+//               der Dachoberkante, s. Platinen-Einstecktiefe, sonst würde er
+//               bei dickem Dach (inset_top > licht_h) bündig bis unters Dach
+//               reichen und den Dachausschnitt dort zustellen statt ihn offen
+//               zu lassen).
+module innen_koerper(grow, inset, inset_top) {
+    // Je Seite nur einziehen, wo tatsächlich eine Außenwand gedruckt wird;
+    // ohne sie reichen die Innenwände bis zur Dachkante (s. hat_wand_* oben).
+    inset_le = hat_wand_links  ? inset : 0;
+    inset_ri = hat_wand_rechts ? inset : 0;
+    inset_fr = hat_wand_vorne  ? inset : 0;
+    inset_ba = hat_wand_hinten ? inset : 0;
+    difference() {
+        intersection() {
+            union() {
+                intersection() {
+                    innen_walls_all(grow);
+                    translate([-0.1, -0.1, -0.1])
+                        cube([room_width + 0.2, room_depth + 0.2, room_height - inset_top + 0.1]);
+                }
+                intersection() {
+                    for (l = licht) licht_transform(l) tunnel(l, grow);
+                    translate([-0.1, -0.1, -0.1])
+                        cube([room_width + 0.2, room_depth + 0.2, room_height - licht_h + 0.1]);
+                }
+            }
+            translate([po_le + inset_le, po_fr + inset_fr, -0.1])
+                cube([room_width  - po_le - po_ri - inset_le - inset_ri,
+                      room_depth  - po_fr - po_ba - inset_fr - inset_ba,
+                      room_height + 0.1]);
+        }
+        for (l = licht)
+            licht_transform(l) {
+                licht_hole(l, room_height - licht_h, licht_h + 0.1);
+                // Aussparung für die Schalterhalterung (dach_feature()): eine
+                // Innenwand, die dort entlangläuft, darf nicht mit ihr
+                // kollidieren, bekommt stattdessen eine Lücke in genau deren
+                // Größe. Der Kabelschlitz dahinter wird auf dieselbe Tiefe
+                // geschnitten, sonst bliebe zwischen beiden eine Stufe.
+                schalter_footprint(l, room_height - 3 - 0.1, 3 + 0.2);
+                mode_switch(l, room_height - 3 - 0.1);
+            }
+    }
+}
+
+module model_aussen() {
+    difference() {
+        union() {
+            // Außenwände – je eine gedrehte Instanz der kanonischen Wand.
+            // Nur wenn Fenster/Türen vorhanden, sonst weggelassen.
+            // Vorne: Außen-Links-Ecke = Raumursprung, keine Drehung.
+            if (len(front_windows) > 0)
+                translate([0, po_fr, 0])
+                    wall_with_windows(room_width, po_le, po_ri, front_windows);
+            // Hinten: um 180° gedreht (Außen-Links liegt bei +X/+Y).
+            if (len(back_windows) > 0)
+                translate([room_width, room_depth - po_ba, 0]) rotate([0, 0, 180])
+                    wall_with_windows(room_width, po_ri, po_le, back_windows);
+            // Links: um -90° gedreht (Außen-Links liegt bei +Y).
+            if (len(left_windows) > 0)
+                translate([po_le, room_depth, 0]) rotate([0, 0, -90])
+                    wall_with_windows(room_depth, po_ba, po_fr, left_windows);
+            // Rechts: um +90° gedreht (Außen-Links liegt bei -Y).
+            if (len(right_windows) > 0)
+                translate([room_width - po_ri, 0, 0]) rotate([0, 0, 90])
+                    wall_with_windows(room_depth, po_fr, po_ba, right_windows);
+
+            // Dach mit Lichtöffnungen und Dachausschnitten
+            difference() {
+                translate([po_le, po_fr, room_height - dachwand_eff])
+                    cube([room_width - po_le - po_ri, room_depth - po_fr - po_ba, dachwand_eff]);
+                for (l = licht)
+                    licht_transform(l)
+                        licht_hole(l, room_height - dachwand_eff - 0.1, dachwand_eff + 0.2);
+                // dach_cuts-Eintrag: [x, y, breite, tiefe] = Rechteck-Ausschnitt (Ecke x,y),
+                //                    [cx, cy, led]         = Öffnung nach LED-Typ (Mitte cx,cy)
+                for (c = dach_cuts)
+                    if (len(c) >= 4)
+                        translate([c[0], c[1], room_height - dachwand_eff - 0.1])
+                            cube([c[2], c[3], dachwand_eff + 0.2]);
+                    else
+                        translate([c[0], c[1], room_height - dachwand_eff/2])
+                            rotate([180, 0, 0])
+                                led_negative_by_type(c[2], dachwand_eff);
+            }
+
+            // Randrahmen für jeden Dachausschnitt (fest mit dem Dach verschmolzen)
+            for (l = licht)
+                licht_transform(l)
+                    licht_border(l);
+
+            // Ausrichtungshilfe + Schalterhalterung (gehören zum Dach, nicht zum Tunnel)
+            for (l = licht)
+                licht_transform(l)
+                    dach_feature(l);
+
+            // Zapfen der Stapelecken ab dem ersten Obergeschoss
+            if (geschoss_nr > 0)
+                ecken_pin();
+
+            // Führungsschienen für die Innenwände unter dem Dach (nur bei
+            // getrenntem Druck wirksam, s. dach_schienen()).
+            dach_schienen();
+
+        } // union
+
+        // Gravur in die Dachoberseite
+        for (t = texts)
+            translate([t[1], t[2], room_height - dachwand_eff + 0.4])
+                rotate([0, 0, t[3]])
+                    linear_extrude(height = dachwand_eff)
+                        text(t[0], size = 5);
+
+        // Aussparungen der Stapelecken, sobald ein Stockwerk angegeben ist
+        if (geschoss_nr >= 0)
+            ecken_cut();
+
+        // Kabelschlitz global schneiden
+        for (l = licht)
+            licht_transform(l) mode_switch(l);
+
+        // Nuten an den Seitenwänden: Innenkörper mit Querspiel, bis
+        // wand_nut_min_rest an die Außenfläche heran. Am Dach kein Zapfen mehr
+        // (siehe dach_schienen()): der Schnitt reicht nur bis zur
+        // Dachunterseite, bündig mit den Innenwänden.
+        innen_koerper(wand_nut_spiel, wand_nut_min_rest, dachwand_eff);
+    }
+}
+
+// Druckteil innen: Zapfen an den Seitenwänden enden um das Längsspiel vor dem
+// Nutgrund (bei dünner Außenwand ohne Längsspiel, siehe wand_nut_spiel_ab). Am
+// Dach kein Zapfen mehr: die Innenwände reichen bündig bis zur Dachunterseite
+// und werden dort (bei getrenntem Druck) von den Führungsschienen geführt
+// (siehe dach_schienen()).
+module model_innen() {
+    innen_koerper(0, wand_nut_min_rest + wand_spiel_laengs, dachwand_eff);
 }
 
 // ── Hauptgeometrie ────────────────────────────────────────────────────────────
 // Druckorientierung: Modell um die X-Achse kippen, so dass die Dachfläche
-// (ursprünglich Oberkante bei z=room_height) flach auf dem Druckbett (z=0) liegt.
+// (ursprünglich Oberkante bei z=room_height) flach auf dem Druckbett liegt.
+module dach_unten() {
+    translate([0, room_depth, 0]) rotate([180, 0, 0]) children();
+}
 
-translate([0, room_depth, 0]) rotate([180, 0, 0])
-difference() {
-union() {
+// Getrennt gedruckt (beide/innen) liegt das Innenteil, anders als die Hülle,
+// ungedreht mit seiner Unterseite (z=0) auf dem Druckbett — dieselbe Höhe wie
+// das Dach der Hülle (z = -room_height), da die Innenwände dort beginnen.
+// Vorteil gegenüber einer Drehung wie bei der Hülle: die IDC-Grundplatte
+// (idc_socket_body()) liegt dann selbst plan auf dem Druckbett und braucht
+// keine Stützfase mehr; ihre Steckertasche (idc_socket_cavity()) öffnet dafür
+// nach oben statt nach unten, s. dort.
+module innen_unten() {
+    translate([0, 0, -room_height]) children();
+}
 
-    // Außenwände – je eine gedrehte Instanz der kanonischen Wand.
-    // Nur wenn Fenster/Türen vorhanden, sonst weggelassen.
-    // Vorne: Außen-Links-Ecke = Raumursprung, keine Drehung.
-    if (len(front_windows) > 0)
-        translate([0, po_fr, 0])
-            wall_with_windows(room_width, po_le, po_ri, front_windows);
-    // Hinten: um 180° gedreht (Außen-Links liegt bei +X/+Y).
-    if (len(back_windows) > 0)
-        translate([room_width, room_depth - po_ba, 0]) rotate([0, 0, 180])
-            wall_with_windows(room_width, po_ri, po_le, back_windows);
-    // Links: um -90° gedreht (Außen-Links liegt bei +Y).
-    if (len(left_windows) > 0)
-        translate([po_le, room_depth, 0]) rotate([0, 0, -90])
-            wall_with_windows(room_depth, po_ba, po_fr, left_windows);
-    // Rechts: um +90° gedreht (Außen-Links liegt bei -Y).
-    if (len(right_windows) > 0)
-        translate([room_width - po_ri, 0, 0]) rotate([0, 0, 90])
-            wall_with_windows(room_depth, po_fr, po_ba, right_windows);
-
-    // Dach mit Lichtöffnungen und Dachausschnitten
-    difference() {
-        translate([po_le, po_fr, room_height - dachwand])
-            color([0,0,0.5]) cube([room_width - po_le - po_ri, room_depth - po_fr - po_ba, dachwand]);
-        for (l = licht)
-            licht_transform(l)
-                translate([l[0] - licht_w/2, l[1] - licht_d/2, room_height - dachwand - 0.1])
-                    cube([licht_w, licht_d, dachwand + 0.2]);
-        // dach_cuts-Eintrag: [x, y, breite, tiefe] = Rechteck-Ausschnitt (Ecke x,y),
-        //                    [cx, cy, led]         = Öffnung nach LED-Typ (Mitte cx,cy)
-        for (c = dach_cuts)
-            if (len(c) >= 4)
-                translate([c[0], c[1], room_height - dachwand - 0.1])
-                    cube([c[2], c[3], dachwand + 0.2]);
-            else
-                translate([c[0], c[1], room_height - dachwand/2])
-                    rotate([180, 0, 0])
-                        led_negative_by_type(c[2], dachwand);
+if (export == "kompakt") {
+    dach_unten() {
+        color([1, 0, 0]) model_aussen();
+        color([1, 1, 0]) model_innen();
     }
-
-    // Tunnel-Struktur für jeden Dachausschnitt
-    for (l = licht)
-        licht_transform(l)
-            color([1, 0.4, 0]) tunnel(l);
-
-    // Innenwände
-    color([0.5, 0.5, 0.8]) {
-        inner_walls_place(0, front_walls);
-        inner_walls_place(1, back_walls);
-        inner_walls_place(2, left_walls);
-        inner_walls_place(3, right_walls);
-        poly_walls_draw(poly_walls);
-        named_walls_draw(is_undef(named_walls) ? [] : named_walls);
-    }
-
-    // Randrahmen für jeden Dachausschnitt
-    for (l = licht)
-        licht_transform(l)
-            color([0.8, 0.8, 0]) licht_border(l);
-
-    // Zapfen der Stapelecken ab dem ersten Obergeschoss
-    if (geschoss_nr > 0)
-        color([0.8, 0.8, 0]) ecken_pin();
-} // union
-
-// Aussparungen der Stapelecken, sobald ein Stockwerk angegeben ist
-if (geschoss_nr >= 0)
-    ecken_cut();
-
-// Kabelschlitz global schneiden
-for (l = licht)
-    licht_transform(l) mode_switch(l);
-
-for (t = texts)
-    translate([t[1], t[2], room_height - dachwand + 0.4])
-        rotate([0, 0, t[3]])
-            linear_extrude(height = dachwand)
-                text(t[0], size = 5);
-
-} // difference
+} else {
+    if (export == "aussen" || export == "beide")
+        dach_unten() color([1, 0, 0]) model_aussen();
+    if (export == "innen" || export == "beide")
+        translate(export != "beide" ? [0, 0, 0] :
+                  room_width >= room_depth ? [0, room_depth + maske_spalt, 0]
+                                           : [room_width + maske_spalt, 0, 0])
+            innen_unten() color([1, 1, 0]) model_innen();
+}

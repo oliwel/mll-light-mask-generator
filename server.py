@@ -107,6 +107,7 @@ def _rate_ok(key: str, limit: int = RATE_LIMIT) -> bool:
         return True
 
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR    = os.path.join(BASE_DIR, "static")
 MASK_SCAD     = os.path.join(BASE_DIR, "house_mask.scad")
 LIGHTBOX_SCAD = os.path.join(BASE_DIR, "lightbox.scad")
 
@@ -117,7 +118,17 @@ MAX_SAMPLE_BYTES = 64 * 1024  # Schutz gegen versehentlich große Dateien
 MAX_SAMPLE_PATH  = 512        # Zeichen im ?path=-Parameter
 
 KNOWN_SECTIONS = {"raum", "wand", "vorne", "hinten", "links", "rechts", "licht", "dach", "druck", "text"}
-DRUCK_KEYS     = {"wand", "aussen", "innen", "dach"}
+DRUCK_KEYS     = {"aussen", "innen", "dach"}
+# "export" (Aufrufparameter, nicht Teil der CSV) wählt die Ausgabe für
+# Multi-Material-/Mehrteil-Druck: kompakt (Gebäude, Default), beide (getrennte
+# Objekte), innen, aussen.
+EXPORT_VALUES  = {"kompakt", "beide", "innen", "aussen"}
+EXPORT_DEFAULT = "kompakt"
+# Einstecktiefe Lichtausschnitt von Dachoberkante, muss licht_h in house_mask.scad entsprechen
+_LICHT_H = 1.2
+# Mindeststärken [mm]: Wände 0.8 (an jeder Nut bleibt wand_nut_min_rest aus
+# house_mask.scad zur sichtbaren Außenfläche stehen), Dach mindestens licht_h.
+DRUCK_MIN = {"aussen": 0.8, "innen": 0.8, "dach": _LICHT_H}
 
 # ── Lichtbox-Modus (Schlüsselwort "box") ────────────────────────────────────────
 # Eigener Renderer (lightbox.scad). "box" und "raum" schließen sich gegenseitig aus.
@@ -140,7 +151,7 @@ _DACH_LED_R     = 5.5  # mm halbe max. LED-Öffnungsgröße (WS2812 Ø11) für R
 _RULES = {
     "raum":   {"counts": {3},       "max_rows": 2, "hint": "breite,tiefe,hoehe  [offset[,fussboden]]  [G<n>]"},
     "wand":   {"hint": "x1,y1,x2,y2[,...,xn,yn]  |  x,y (Fortsetzung)"},
-    "druck":  {"hint": "schluessel,wert  (z.B. wand,0.8)"},
+    "druck":  {"hint": "schluessel,wert  (z.B. aussen,1.2)"},
     "licht":  {"hint": "x,y[,rotation][,weiter|ende][,idc|stack]"},
     "dach":   {"hint": "x,y,breite,tiefe  |  x,y,<ledtyp>"},
     "text":   {"hint": "Text  |  x,y,Text  |  x,y,rotation,Text"},
@@ -333,15 +344,21 @@ def validate_and_parse(text: str) -> dict:
                 if len(values_all) != 2 or not _numeric(values_all[1]):
                     errors.append(
                         f'Zeile {lineno}: Abschnitt "druck" erwartet "schluessel,wert", '
-                        f'z.B. "wand,0.8"'
+                        f'z.B. "aussen,1.2"'
                     )
                     continue
                 try:
-                    parsed = _parse_values([values_all[1]])
+                    value = _parse_values([values_all[1]])[0]
                 except ValidationError as e:
                     errors.append(f"Zeile {lineno}: {e}")
                     continue
-                sections[current].append([keyword, parsed[0]])
+                if value < DRUCK_MIN.get(keyword, 0):
+                    errors.append(
+                        f'Zeile {lineno}: "{keyword}" muss mindestens '
+                        f'{DRUCK_MIN[keyword]} mm sein (Mindeststärke)'
+                    )
+                    continue
+                sections[current].append([keyword, value])
                 row_counts[current] += 1
                 continue
             # Stockwerks-Zeile "G<n>" im raum-Abschnitt — ebenfalls vor der Keyword-Prüfung.
@@ -696,6 +713,42 @@ def _clip_poly_wall(poly, xmin, xmax, ymin, ymax):
             return list(seg)
 
 
+def _clip_poly_chain(pts, xmin, xmax, ymin, ymax, clip_start=True, clip_end=True):
+    """Clip a whole polyline against the print area, touching only its open
+    end(s). Ein Wandende, das bewusst über die Außenwand hinaus gezeichnet
+    wurde (s. house_mask.scad), wird auf deren Außenfläche zurückgeschnitten;
+    alle Zwischenpunkte bleiben unverändert, damit echte Knicke im Polygonzug
+    als solche erhalten bleiben (statt in lauter 2-Punkt-Segmente zu
+    zerfallen). clip_start/clip_end = False für ein Ende, das an einer
+    benannten Fensterwand sitzt statt an einer Außenwand – dieser Punkt ist
+    bereits exakt und wird nie verschoben. Liegt ein zu klippendes Endsegment
+    komplett außerhalb, entfällt dessen äußerer Punkt und der nächste wird
+    geprüft. Gibt die geklippte Punktliste zurück, oder None, wenn weniger als
+    zwei Punkte übrig bleiben.
+    """
+    pts = list(pts)
+    if clip_start:
+        while len(pts) >= 2:
+            seg = _clip_segment(pts[0], pts[1], xmin, xmax, ymin, ymax)
+            if seg is None:
+                pts.pop(0)
+                continue
+            pts[0] = seg[0]
+            break
+        if len(pts) < 2:
+            return None
+    if clip_end:
+        while len(pts) >= 2:
+            seg = _clip_segment(pts[-2], pts[-1], xmin, xmax, ymin, ymax)
+            if seg is None:
+                pts.pop()
+                continue
+            pts[-1] = seg[1]
+            break
+        if len(pts) < 2:
+            return None
+    return pts
+
 
 def _poly_walls_val(polys: list) -> str:
     def fmt_poly(pts):
@@ -959,10 +1012,9 @@ def generate_scad(sections: dict) -> str:
     offset, fussboden = _normalize_offset(raum_rows[1] if len(raum_rows) > 1 else None)
 
     druck      = {row[0]: row[1] for row in sections.get("druck", [])}
-    wand       = druck.get("wand",   0.8)
-    aussenwand = druck.get("aussen", wand)
-    innenwand  = druck.get("innen",  wand)
-    dachwand   = druck.get("dach",   1.0)
+    aussenwand = druck.get("aussen", 1.2)
+    innenwand  = druck.get("innen",  1.0)
+    dachwand   = druck.get("dach",   _LICHT_H)
 
     po_fr, po_ri, po_ba, po_le = offset
 
@@ -971,46 +1023,62 @@ def generate_scad(sections: dict) -> str:
     if geo_errors:
         raise ValidationError("\n".join(geo_errors))
 
-    # wand-Einträge: je Polygonzug jedes Segment einzeln behandeln. Benanntes
-    # Segment mit Fenster-Abschnitt → named_walls (gerade Fensterwand); alle
-    # übrigen Segmente → poly_walls (freie Innenwände, geklippt).
+    # wand-Einträge: ein Polygonzug bleibt zwischen benannten Fensterwänden am
+    # Stück (echte Zwischenpunkte/Knicke bleiben als solche erhalten, s.
+    # house_mask.scad: poly_wall_joint()); nur die beiden offenen Enden des
+    # gesamten Zugs werden auf die Außenwand geklippt. Ein benanntes Segment
+    # mit Fenster-Abschnitt wird weiterhin als eigene, gerade named_walls-
+    # Wand herausgelöst; sein Endpunkt bleibt für den jeweils anschließenden
+    # Lauf unverändert (kein Klippen an einer internen Knickstelle).
     named_walls = []
     poly_walls = []
     geo_errors2 = []
     for e in sections.get("wand", []):
         pts = [_resolve_poly_point(p[0], p[1], w, d) for p in e["pts"]]
         names = e["names"]
-        for i in range(len(pts) - 1):
-            seg = [pts[i], pts[i + 1]]
+        n_pts = len(pts)
+
+        def _emit_run(start, end, clip_start, clip_end):
+            if end <= start:
+                return
+            cords = _clip_poly_chain(pts[start:end + 1], po_le, w - po_ri, po_fr, d - po_ba,
+                                      clip_start=clip_start, clip_end=clip_end)
+            if cords:
+                poly_walls.append(cords)
+
+        run_start = 0
+        for i in range(n_pts - 1):
             nm = names.get(i)
             wins = sections.get(nm) if nm else None
-            if nm and wins:
-                (x1, y1), (x2, y2) = seg
-                wall_len = math.hypot(x2 - x1, y2 - y1)
-                for k, win in enumerate(wins, 1):
-                    wx, wz, ww, wh = win
-                    if wx < 0 or wx + ww > wall_len:
-                        geo_errors2.append(
-                            f'Fensterwand "{nm}" Öffnung {k}: {wx:.4g}–{wx+ww:.4g} '
-                            f"außerhalb der Wandlänge (0–{wall_len:.4g})"
-                        )
-                    err = _height_error(f'Fensterwand "{nm}" Öffnung {k}',
-                                        win, room_h, fussboden)
-                    if err:
-                        geo_errors2.append(err)
-                cords = _clip_poly_wall([seg[0], seg[1]], po_le, w - po_ri, po_fr, d - po_ba)
-                if cords:
-                    # Fenster der Innenwände genauso auf Maskenkoordinaten bringen
-                    # wie die der Außenwände; die x-Position ist hier immer absolut.
-                    cords.append([[win[0], _win_z(win, fussboden), win[2], win[3]]
-                                  for win in wins])
-                    named_walls.append(cords)
-            else:
-                # Vollständig außerhalb liegende Segmente liefern None und
-                # entfallen, statt als leerer Eintrag in die SCAD-Liste zu gehen.
-                cords = _clip_poly_wall(seg, po_le, w - po_ri, po_fr, d - po_ba)
-                if cords:
-                    poly_walls.append(cords)
+            if not (nm and wins):
+                continue
+            # Lauf bis zu diesem benannten Segment abschließen; sein Ende
+            # grenzt an die Fensterwand, nicht an eine Außenwand.
+            _emit_run(run_start, i, clip_start=(run_start == 0), clip_end=False)
+            seg = [pts[i], pts[i + 1]]
+            (x1, y1), (x2, y2) = seg
+            wall_len = math.hypot(x2 - x1, y2 - y1)
+            for k, win in enumerate(wins, 1):
+                wx, wz, ww, wh = win
+                if wx < 0 or wx + ww > wall_len:
+                    geo_errors2.append(
+                        f'Fensterwand "{nm}" Öffnung {k}: {wx:.4g}–{wx+ww:.4g} '
+                        f"außerhalb der Wandlänge (0–{wall_len:.4g})"
+                    )
+                err = _height_error(f'Fensterwand "{nm}" Öffnung {k}',
+                                    win, room_h, fussboden)
+                if err:
+                    geo_errors2.append(err)
+            cords = _clip_poly_wall([seg[0], seg[1]], po_le, w - po_ri, po_fr, d - po_ba)
+            if cords:
+                # Fenster der Innenwände genauso auf Maskenkoordinaten bringen
+                # wie die der Außenwände; die x-Position ist hier immer absolut.
+                cords.append([[win[0], _win_z(win, fussboden), win[2], win[3]]
+                              for win in wins])
+                named_walls.append(cords)
+            run_start = i + 1
+        # Restlicher Lauf nach der letzten (oder ohne jede) Fensterwand.
+        _emit_run(run_start, n_pts - 1, clip_start=(run_start == 0), clip_end=True)
     if geo_errors2:
         raise ValidationError("\n".join(geo_errors2))
 
@@ -1094,7 +1162,6 @@ def generate_scad(sections: dict) -> str:
         f"room_height  = {room_h};",
         f"licht_w      = {_LICHT_W};",
         f"licht_d      = {_LICHT_D};",
-        f"wand         = {wand};",
         f"aussenwand   = {aussenwand};",
         f"innenwand    = {innenwand};",
         f"dachwand     = {dachwand};",
@@ -1213,8 +1280,30 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/sample":
             self._send_sample(parsed.query)
             return
+        if parsed.path.startswith("/static/"):
+            self._send_static(parsed.path[len("/static/"):])
+            return
         # Jeder andere Pfad liefert die Seite.
         self._send(200, "text/html; charset=utf-8", _render())
+
+    def _send_static(self, rel: str):
+        """Liefert lokal abgelegte JS-Bibliotheken (nur .js und Lizenztexte)."""
+        path = os.path.realpath(os.path.join(STATIC_DIR, rel))
+        allowed = path.startswith(STATIC_DIR + os.sep) and os.path.isfile(path) \
+            and path.endswith((".js", "LICENSE", ".txt"))
+        if not allowed:
+            self._send(404, "text/plain; charset=utf-8", "Nicht gefunden.")
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        ctype = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/plain; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self._security_headers()
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_sample(self, query: str):
         ip = self.client_address[0]
@@ -1233,15 +1322,22 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(200, "text/plain; charset=utf-8", content)
 
-    def _read_csv(self) -> str | None:
+    def _read_form(self) -> tuple[str, str] | None:
         length = int(self.headers.get("Content-Length", 0))
         if length > MAX_BODY:
             self._send(413, "text/plain; charset=utf-8", "Anfrage zu groß (max 4 KB)")
             return None
         body = self.rfile.read(length).decode("utf-8", errors="replace")
-        return parse_qs(body).get("csv", [""])[0]
+        form = parse_qs(body)
+        export = form.get("export", [EXPORT_DEFAULT])[0]
+        if export not in EXPORT_VALUES:
+            self._send(422, "text/plain; charset=utf-8",
+                       f"Ungültiges Exportformat, erlaubt: {sorted(EXPORT_VALUES)}")
+            return None
+        return form.get("csv", [""])[0], export
 
-    def _generate_model(self, csv_content: str, out_ext: str = "stl") -> tuple:
+    def _generate_model(self, csv_content: str, out_ext: str = "stl",
+                        export: str = EXPORT_DEFAULT) -> tuple:
         try:
             sections  = validate_and_parse(csv_content)
             scad_data = generate_scad(sections)
@@ -1275,7 +1371,7 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 r = subprocess.run(
-                    ["openscad", "-o", stl_path, render_main],
+                    ["openscad", "-o", stl_path, "-D", f'export="{export}"', render_main],
                     capture_output=True, text=True, cwd=tmpdir,
                     timeout=60,
                 )
@@ -1297,12 +1393,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(429, "text/plain; charset=utf-8", "Zu viele Anfragen – bitte warten.")
             return
 
-        csv_content = self._read_csv()
-        if csv_content is None:
+        form = self._read_form()
+        if form is None:
             return
+        csv_content, export = form
 
         if self.path == "/export3mf":
-            data, error = self._generate_model(csv_content, "3mf")
+            data, error = self._generate_model(csv_content, "3mf", export)
             if error:
                 self._send(422, "text/plain; charset=utf-8", error)
             else:
@@ -1315,24 +1412,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             return
 
-        stl_data, error = self._generate_model(csv_content, "stl")
-
         if self.path == "/preview":
+            # Vorschau als farbiges 3MF (STL kennt keine Farben)
+            data, error = self._generate_model(csv_content, "3mf", export)
             if error:
                 self._send(422, "text/plain; charset=utf-8", error)
             else:
-                self._send(200, "model/stl", stl_data)
+                self._send(200, "model/3mf", data)
+            return
+
+        stl_data, error = self._generate_model(csv_content, "stl", export)
+        if error:
+            self._send(422, "text/plain; charset=utf-8", error)
         else:
-            if error:
-                self._send(422, "text/plain; charset=utf-8", error)
-            else:
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Disposition", 'attachment; filename="house_mask.stl"')
-                self.send_header("Content-Length", str(len(stl_data)))
-                self._security_headers()
-                self.end_headers()
-                self.wfile.write(stl_data)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="house_mask.stl"')
+            self.send_header("Content-Length", str(len(stl_data)))
+            self._security_headers()
+            self.end_headers()
+            self.wfile.write(stl_data)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
